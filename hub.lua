@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.4.3"
+local VERSION = "1.4.4"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -104,6 +104,12 @@ local WIN_W, WIN_H = 620, 410
 local TOP_H, RAIL_W, PAD = 42, 152, 12
 local ROW_W = WIN_W - RAIL_W - PAD * 2
 
+-- the show/hide chip sits at the top centre; phones need room for the Roblox
+-- topbar, and the window keeps clear of the chip instead of hiding behind it
+local IS_MOBILE = UIS.TouchEnabled and not UIS.KeyboardEnabled
+local CHIP_TOP = IS_MOBILE and 44 or 10
+local TOP_RESERVE = IS_MOBILE and (CHIP_TOP + 40) or 0
+
 -- ============================================================
 -- STATE
 -- ============================================================
@@ -168,15 +174,81 @@ end
 -- ============================================================
 -- NOTIFICATIONS
 -- ============================================================
+-- Toast cards: drawn icon, title, body, accent rail and a draining timer bar.
+-- notify(text, kind, title) keeps every two-argument call site working.
 local notifyOn = true
 local notifHolder
 local notifCards = {}
 
+local NOTIF_W, NOTIF_H, NOTIF_STEP = 300, 58, 64
+local NOTIF_LIFE = 3.6
+
+local NOTIF_STYLE = {
+    success = { color = THEME.Green, title = "Success", mark = "check" },
+    error   = { color = THEME.Red, title = "Error", mark = "bang" },
+    warn    = { color = Color3.fromRGB(255, 176, 66), title = "Warning", mark = "bang" },
+    info    = { color = THEME.Accent, title = BRAND, mark = "brand" },
+}
+
+-- Gotham has no check mark glyph, so the icon is drawn out of two bars
+local function drawMark(kind, parent, color)
+    local box = new("Frame", {
+        Size = UDim2.fromOffset(22, 22),
+        Position = UDim2.fromOffset(10, 8),
+        BackgroundColor3 = color,
+        BackgroundTransparency = 0.85,
+        BorderSizePixel = 0,
+    }, parent)
+    new("UICorner", { CornerRadius = UDim.new(0, 6) }, box)
+
+    if kind == "check" then
+        local a = new("Frame", {
+            Size = UDim2.fromOffset(2, 6),
+            Position = UDim2.fromOffset(7, 11),
+            Rotation = -45,
+            BackgroundColor3 = color,
+            BorderSizePixel = 0,
+        }, box)
+        new("UICorner", { CornerRadius = UDim.new(1, 0) }, a)
+        local b = new("Frame", {
+            Size = UDim2.fromOffset(2, 10),
+            Position = UDim2.fromOffset(12, 8),
+            Rotation = 45,
+            BackgroundColor3 = color,
+            BorderSizePixel = 0,
+        }, box)
+        new("UICorner", { CornerRadius = UDim.new(1, 0) }, b)
+    elseif kind == "bang" then
+        new("Frame", {
+            Size = UDim2.fromOffset(2, 9),
+            Position = UDim2.fromOffset(10, 5),
+            BackgroundColor3 = color,
+            BorderSizePixel = 0,
+        }, box)
+        local dot = new("Frame", {
+            Size = UDim2.fromOffset(2, 2),
+            Position = UDim2.fromOffset(10, 16),
+            BackgroundColor3 = color,
+            BorderSizePixel = 0,
+        }, box)
+        new("UICorner", { CornerRadius = UDim.new(1, 0) }, dot)
+    else
+        new("TextLabel", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundTransparency = 1,
+            Text = "T",
+            Font = Enum.Font.GothamBlack,
+            TextSize = 12,
+            TextColor3 = color,
+        }, box)
+    end
+end
+
 local function reflowNotifs()
     for i, card in ipairs(notifCards) do
         if card.Parent then
-            TweenService:Create(card, TweenInfo.new(0.15), {
-                Position = UDim2.new(1, -272, 0, (i - 1) * 46),
+            TweenService:Create(card, TweenInfo.new(0.18, Enum.EasingStyle.Quint), {
+                Position = UDim2.new(1, -(NOTIF_W + 16), 0, 12 + (i - 1) * NOTIF_STEP),
             }):Play()
         end
     end
@@ -193,7 +265,7 @@ local function dropNotif(card)
     reflowNotifs()
 end
 
-local function notify(text, kind)
+local function notify(text, kind, title)
     if not notifyOn then return end
     if not notifHolder or not notifHolder.Parent then
         notifHolder = new("ScreenGui", {
@@ -205,52 +277,83 @@ local function notify(text, kind)
         notifCards = {}
     end
 
-    local color = THEME.Accent
-    if kind == "success" then color = THEME.Green
-    elseif kind == "error" then color = THEME.Red end
-
-    if #notifCards >= 5 then
-        dropNotif(notifCards[1])
-    end
+    local style = NOTIF_STYLE[kind] or NOTIF_STYLE.info
+    if #notifCards >= 5 then dropNotif(notifCards[1]) end
 
     local slot = #notifCards
     local card = new("Frame", {
-        Size = UDim2.fromOffset(258, 40),
-        Position = UDim2.new(1, 20, 0, slot * 46),
+        Size = UDim2.fromOffset(NOTIF_W, NOTIF_H),
+        Position = UDim2.new(1, NOTIF_W + 24, 0, 12 + slot * NOTIF_STEP),
         BackgroundColor3 = THEME.Panel,
         BorderSizePixel = 0,
         ClipsDescendants = true,
     }, notifHolder)
     table.insert(notifCards, card)
-    new("UICorner", { CornerRadius = UDim.new(0, 7) }, card)
-    new("UIStroke", { Color = color, Thickness = 1, Transparency = 0.45 }, card)
+    new("UICorner", { CornerRadius = UDim.new(0, 8) }, card)
+    new("UIStroke", { Color = style.color, Thickness = 1, Transparency = 0.55 }, card)
+
     new("Frame", {
         Size = UDim2.new(0, 3, 1, 0),
-        BackgroundColor3 = color,
+        BackgroundColor3 = style.color,
         BorderSizePixel = 0,
     }, card)
+
+    drawMark(style.mark, card, style.color)
+
     new("TextLabel", {
-        Size = UDim2.new(1, -16, 1, 0),
-        Position = UDim2.fromOffset(12, 0),
+        Size = UDim2.new(1, -52, 0, 16),
+        Position = UDim2.fromOffset(40, 9),
         BackgroundTransparency = 1,
-        Text = text,
+        Text = title or style.title,
         TextXAlignment = Enum.TextXAlignment.Left,
-        TextWrapped = true,
-        Font = Enum.Font.GothamMedium,
+        Font = Enum.Font.GothamBold,
         TextSize = 12,
         TextColor3 = THEME.Text,
+        TextTruncate = Enum.TextTruncate.AtEnd,
     }, card)
 
-    TweenService:Create(card, TweenInfo.new(0.22, Enum.EasingStyle.Quint), {
-        Position = UDim2.new(1, -272, 0, slot * 46),
+    new("TextLabel", {
+        Size = UDim2.new(1, -52, 0, 24),
+        Position = UDim2.fromOffset(40, 25),
+        BackgroundTransparency = 1,
+        Text = tostring(text),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        TextWrapped = true,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 11,
+        TextColor3 = THEME.Sub,
+    }, card)
+
+    -- timer bar: the tween is the clock, so it always matches the dismiss
+    local timer = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 2),
+        Position = UDim2.new(0, 0, 1, -2),
+        BackgroundColor3 = style.color,
+        BackgroundTransparency = 0.25,
+        BorderSizePixel = 0,
+    }, card)
+    TweenService:Create(timer, TweenInfo.new(NOTIF_LIFE, Enum.EasingStyle.Linear), {
+        Size = UDim2.new(0, 0, 0, 2),
     }):Play()
 
-    task.delay(3, function()
+    TweenService:Create(card, TweenInfo.new(0.26, Enum.EasingStyle.Quint), {
+        Position = UDim2.new(1, -(NOTIF_W + 16), 0, 12 + slot * NOTIF_STEP),
+    }):Play()
+
+    card.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dropNotif(card)
+        end
+    end)
+
+    task.delay(NOTIF_LIFE, function()
         if not card.Parent then return end
-        TweenService:Create(card, TweenInfo.new(0.18), {
-            Position = UDim2.new(1, 20, 0, 0),
+        TweenService:Create(card, TweenInfo.new(0.2, Enum.EasingStyle.Quint), {
+            Position = UDim2.new(1, NOTIF_W + 24, 0, 12),
         }):Play()
-        task.wait(0.2)
+        task.wait(0.22)
         dropNotif(card)
     end)
 end
@@ -269,7 +372,7 @@ local window = new("Frame", {
     Name = "Window",
     Size = UDim2.fromOffset(WIN_W, WIN_H),
     AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.fromScale(0.5, 0.5),
+    Position = UDim2.new(0.5, 0, 0.5, TOP_RESERVE / 2),
     BackgroundColor3 = THEME.Bg,
     BorderSizePixel = 0,
     ClipsDescendants = false,
@@ -281,7 +384,7 @@ local winStroke = new("UIStroke", { Color = THEME.Stroke, Thickness = 1 }, windo
 local uiScale = new("UIScale", { Scale = 1 }, window)
 local function fitScreen()
     local vp = (CAM and CAM.ViewportSize) or Vector2.new(1280, 720)
-    local s = math.min(1, (vp.X - 24) / WIN_W, (vp.Y - 24) / WIN_H)
+    local s = math.min(1, (vp.X - 24) / WIN_W, (vp.Y - 24 - TOP_RESERVE) / WIN_H)
     uiScale.Scale = clamp(s, 0.5, 1)
 end
 fitScreen()
@@ -2314,6 +2417,123 @@ end
 Toolkit.State = T
 
 -- ============================================================
+-- PROTECTION
+-- ============================================================
+-- Client-side only, and honest about it: a server kick cannot be cancelled
+-- from the client, so Anti-Kick stops the local Kick() calls game scripts
+-- make, and says so instead of pretending it is a shield.
+local Protect = { kickOn = false, hidden = false, locked = false, restoreKick = nil }
+
+function Protect.apiScore()
+    local have, total = 0, 0
+    for _, present in pairs(CAP) do
+        total = total + 1
+        if present then have = have + 1 end
+    end
+    return have, total
+end
+
+function Protect.hideGui(on, quiet)
+    if on then
+        local holder
+        if type(gethui) == "function" then
+            local ok, res = pcall(gethui)
+            if ok then holder = res end
+        end
+        if not holder and type(get_hidden_gui) == "function" then
+            local ok, res = pcall(get_hidden_gui)
+            if ok then holder = res end
+        end
+        if not holder then
+            if not quiet then
+                notify("gethui is missing - the hub stays in PlayerGui", "warn", "Protection")
+            end
+            return false
+        end
+        gui.Parent = holder
+        Protect.hidden = true
+        return true
+    end
+    gui.Parent = PG
+    Protect.hidden = false
+    return true
+end
+
+function Protect.lockGui(on, quiet)
+    if not on then
+        Protect.locked = false
+        return true
+    end
+    if type(protectgui) ~= "function" then
+        if not quiet then
+            notify("protectgui is missing - the GUI stays unlocked", "warn", "Protection")
+        end
+        return false
+    end
+    local ok = pcall(protectgui, gui, true)
+    Protect.locked = ok
+    return ok
+end
+
+function Protect.antiKick(on, quiet)
+    if Protect.restoreKick then
+        pcall(Protect.restoreKick)
+        Protect.restoreKick = nil
+    end
+    Protect.kickOn = on and true or false
+    if not on then return true end
+
+    if type(hookmetamethod) ~= "function" or type(getnamecallmethod) ~= "function" then
+        Protect.kickOn = false
+        if not quiet then
+            notify("hookmetamethod is missing - Anti-Kick is off here", "warn", "Protection")
+        end
+        return false
+    end
+
+    local original
+    original = hookmetamethod(game, "__namecall", function(self, ...)
+        if Protect.kickOn and getnamecallmethod() == "Kick" and self == LP then
+            notify("Kick blocked. A server kick still removes you.", "warn", "Protection")
+            return
+        end
+        return original(self, ...)
+    end)
+    Protect.restoreKick = function()
+        pcall(function() hookmetamethod(game, "__namecall", original) end)
+    end
+    return true
+end
+
+Features.antiKick = function(on, quiet)
+    local ok = Protect.antiKick(on, quiet)
+    if on and ok and not quiet then
+        notify("Anti-Kick armed", "success", "Protection")
+    end
+    return ok
+end
+
+Features.hideGui = function(on, quiet)
+    local ok = Protect.hideGui(on, quiet)
+    if on and ok and not quiet then
+        notify("Hub moved out of PlayerGui", "success", "Protection")
+    end
+    return ok
+end
+
+Features.lockGui = function(on, quiet)
+    local ok = Protect.lockGui(on, quiet)
+    if on and ok and not quiet then
+        notify("GUI locked against Destroy", "success", "Protection")
+    end
+    return ok
+end
+
+Stops.Protect = function()
+    pcall(Protect.antiKick, false, true)
+end
+
+-- ============================================================
 -- PAGES
 -- ============================================================
 local pages = {}
@@ -3043,6 +3263,13 @@ addNote(quest, "Reads the requirement lines on screen, arms the matching farm to
 
 -- ---------- MISC ----------
 local misc = addTab("Misc")
+
+addSection(misc, "Protection")
+addToggle(misc, "Anti-Kick", false, "antiKick", function(v) Features.antiKick(v) end)
+addToggle(misc, "Hide Hub From Game", true, "hideGui", function(v) Features.hideGui(v) end)
+addToggle(misc, "Lock GUI", true, "lockGui", function(v) Features.lockGui(v) end)
+addNote(misc, "Anti-Kick blocks local Kick() calls only. Hide Hub moves the UI out of PlayerGui.", THEME.Sub)
+
 addSection(misc, "Server")
 addButton(misc, "Rejoin", THEME.Text, function() Features.rejoin() end)
 addButton(misc, "Server Hop", THEME.Text, function() Features.hop() end)
@@ -3212,6 +3439,7 @@ end
 
 local minimized = false
 local minBtn, closeBtn
+local setWindowVisible
 
 minBtn = topButton("–", -66, THEME.Sub, function()
     minimized = not minimized
@@ -3229,28 +3457,29 @@ minBtn = topButton("–", -66, THEME.Sub, function()
 end)
 
 closeBtn = topButton("×", -32, THEME.Red, function()
-    window.Visible = false
-    notify("Hidden - tap the Tupachup pill or press " .. tostring(menuKey.Name) .. " to reopen", "info")
+    setWindowVisible(false)
+    notify("Hidden. Tap the Tupachup chip or press " .. tostring(menuKey.Name) .. " to reopen.", "info", "Hidden")
 end)
 
--- always-on hide/show pill. Tap it, or the menu key, to bring the window back.
+-- top-centre chip: always on screen, tap it to show or hide the window
 local pill = new("TextButton", {
     Name = "TupachupPill",
-    Size = UDim2.fromOffset(104, 30),
-    Position = UDim2.fromOffset(12, 12),
+    Size = UDim2.fromOffset(140, 30),
+    AnchorPoint = Vector2.new(0.5, 0),
+    Position = UDim2.new(0.5, 0, 0, CHIP_TOP),
     BackgroundColor3 = Color3.fromRGB(14, 14, 17),
-    BackgroundTransparency = 0.08,
+    BackgroundTransparency = 0.06,
     BorderSizePixel = 0,
     Text = "",
     AutoButtonColor = false,
-    Visible = false,
     ZIndex = 60,
 }, gui)
 new("UICorner", { CornerRadius = UDim.new(1, 0) }, pill)
 local pillStroke = new("UIStroke", { Color = THEME.Stroke, Thickness = 1 }, pill)
+
 local pillMark = new("Frame", {
-    Size = UDim2.fromOffset(16, 16),
-    Position = UDim2.fromOffset(8, 7),
+    Size = UDim2.fromOffset(18, 18),
+    Position = UDim2.fromOffset(7, 6),
     BackgroundColor3 = THEME.Accent,
     BorderSizePixel = 0,
     ZIndex = 61,
@@ -3261,12 +3490,13 @@ new("TextLabel", {
     BackgroundTransparency = 1,
     Text = "T",
     Font = Enum.Font.GothamBlack,
-    TextSize = 11,
+    TextSize = 12,
     TextColor3 = Color3.fromRGB(22, 16, 10),
     ZIndex = 62,
 }, pillMark)
+
 new("TextLabel", {
-    Size = UDim2.new(1, -32, 1, 0),
+    Size = UDim2.fromOffset(84, 30),
     Position = UDim2.fromOffset(30, 0),
     BackgroundTransparency = 1,
     Text = BRAND,
@@ -3276,16 +3506,31 @@ new("TextLabel", {
     TextColor3 = THEME.Text,
     ZIndex = 61,
 }, pill)
+
+-- status led: green while the window is open, grey while it is hidden
+local pillDot = new("Frame", {
+    Size = UDim2.fromOffset(6, 6),
+    Position = UDim2.new(1, -16, 0.5, -3),
+    BackgroundColor3 = THEME.Green,
+    BorderSizePixel = 0,
+    ZIndex = 61,
+}, pill)
+new("UICorner", { CornerRadius = UDim.new(1, 0) }, pillDot)
+
 pill.MouseEnter:Connect(function()
-    TweenService:Create(pillStroke, TweenInfo.new(0.12), { Color = THEME.Accent }):Play()
+    TweenService:Create(pillStroke, TweenInfo.new(0.12), {
+        Color = THEME.Accent, Transparency = 0.15,
+    }):Play()
 end)
 pill.MouseLeave:Connect(function()
-    TweenService:Create(pillStroke, TweenInfo.new(0.12), { Color = THEME.Stroke }):Play()
+    TweenService:Create(pillStroke, TweenInfo.new(0.12), {
+        Color = THEME.Stroke, Transparency = 0,
+    }):Play()
 end)
 
-local function setWindowVisible(on)
+setWindowVisible = function(on)
     window.Visible = on
-    pill.Visible = not on
+    pillDot.BackgroundColor3 = on and THEME.Green or THEME.Sub
     if on and minimized then
         minimized = false
         rail.Visible = true
@@ -3296,7 +3541,7 @@ local function setWindowVisible(on)
 end
 
 pill.MouseButton1Click:Connect(function()
-    setWindowVisible(true)
+    setWindowVisible(not window.Visible)
 end)
 
 track(UIS.InputBegan:Connect(function(input, processed)
@@ -3312,6 +3557,11 @@ end))
 loadWaypoints()
 renderWaypoints()
 
+-- protection defaults land before the welcome, so the first thing on screen is
+-- already the protected build
+pcall(Features.hideGui, true, true)
+pcall(Features.lockGui, true, true)
+
 getgenv().Tupachup = {
     Version = VERSION,
     Unload = Features.unload,
@@ -3319,12 +3569,16 @@ getgenv().Tupachup = {
     Features = Features,
     Toolkit = Toolkit,
     Quest = Quest,
+    Protect = Protect,
     Game = activeGame,
     Detected = DETECTED_NAME,
     Capabilities = CAP,
 }
 
-notify(BRAND .. " v" .. VERSION .. " loaded", "success")
-notify("Game: " .. (GAME_LABEL[activeGame] or "Universal"), "info")
+local apiHave, apiTotal = Protect.apiScore()
+notify((LP.DisplayName or LP.Name) .. "  -  " .. (GAME_LABEL[activeGame] or "Universal"),
+    "success", "Welcome back")
+notify(("%d tabs  -  %d/%d APIs  -  v%s"):format(tabIndex, apiHave, apiTotal, VERSION),
+    "info", BRAND .. " loaded")
 
 print("[" .. BRAND:upper() .. "] v" .. VERSION .. " ready | " .. tostring(game.PlaceId))
