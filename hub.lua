@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.7.0"
+local VERSION = "1.8.0"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -2648,16 +2648,23 @@ end
 
 -- words: at least one must appear. avoid: none may appear. context: if given,
 -- at least one of these must also appear.
+-- The longest matching word wins: "free gift" beats a generic "claim" that a
+-- different panel happens to be showing. A plain claim is still the fallback
+-- when nothing more specific is on screen.
 local function autoFind(words, avoid, context)
-    local hit
+    local best, bestScore, longest = nil, 0, 0
+    for _, w in ipairs(words) do
+        if #w > longest then longest = #w end
+    end
+
     eachGameGui(function(inst)
         if inst:IsA("GuiButton") and isShown(inst) then
             local hay = string.lower(inst.Name) .. " " .. string.lower(inst.Text or "")
-            local matched = false
+            local score = 0
             for _, w in ipairs(words) do
-                if string.find(hay, w, 1, true) then matched = true break end
+                if #w > score and string.find(hay, w, 1, true) then score = #w end
             end
-            if matched then
+            if score > 0 then
                 local blocked = false
                 for _, w in ipairs(avoid or {}) do
                     if string.find(hay, w, 1, true) then blocked = true break end
@@ -2669,14 +2676,16 @@ local function autoFind(words, avoid, context)
                     end
                 end
                 if not blocked then
-                    hit = inst
-                    return false
+                    if score > bestScore then
+                        best, bestScore = inst, score
+                    end
+                    if bestScore >= longest then return false end
                 end
             end
         end
         return nil
     end)
-    return hit
+    return best
 end
 
 function Auto.use(words, key, seconds, avoid, context)
@@ -2709,6 +2718,67 @@ function Auto.options(words, fallback, cap)
     if #out == 0 then return fallback end
     table.sort(out)
     return out
+end
+
+-- flies the character to the nearest part whose name matches, then fires its
+-- prompt if it has one. Used by the "find" switches: relics, admin characters,
+-- secret key merchants. Never invents a remote.
+function Auto.flyToWords(words, key, seconds)
+    if not autoThrottle(key, seconds) then return false end
+    local hrp = root()
+    if not hrp then return false end
+
+    local target, bestDist, scanned = nil, nil, 0
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        scanned = scanned + 1
+        if scanned > 12000 then break end
+        if obj:IsA("BasePart") then
+            local low = string.lower(obj.Name)
+            for _, w in ipairs(words) do
+                if string.find(low, w, 1, true) then
+                    local d = (obj.Position - hrp.Position).Magnitude
+                    if d < 900 and (not bestDist or d < bestDist) then
+                        bestDist, target = d, obj
+                    end
+                    break
+                end
+            end
+        end
+    end
+    if not target then return false end
+
+    for _, d in ipairs(target:GetDescendants()) do
+        if d:IsA("ProximityPrompt") and d.Enabled then
+            pcall(firePrompt, d)
+            break
+        end
+    end
+
+    if bestDist and bestDist < 12 then return true end
+
+    local bv = new("BodyVelocity", {
+        Name = "TupachupFind",
+        MaxForce = Vector3.new(1e5, 1e5, 1e5),
+        Velocity = Vector3.zero,
+    }, hrp)
+    local started = os.clock()
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        if not hrp.Parent or not target.Parent or os.clock() - started > 20 then
+            conn:Disconnect()
+            if bv.Parent then bv:Destroy() end
+            return
+        end
+        local delta = target.Position - hrp.Position
+        if delta.Magnitude < 6 then
+            conn:Disconnect()
+            if bv.Parent then bv:Destroy() end
+            return
+        end
+        bv.Velocity = delta.Unit * math.min(160, delta.Magnitude * 2.5)
+    end)
+    track(conn)
+    return true
 end
 
 function Auto.refreshBreakables()
@@ -2774,6 +2844,18 @@ end
 -- switches from the extra tabs. Each row is one toggle: the flag that turns it
 -- on, the button words to look for, its own cooldown key and default delay.
 local AUTO_RULES = {
+    -- Main: Auto Claim
+    { flag = "autoFreeGifts", key = "freegift", seconds = 3,
+      words = { "free gift", "gift", "claim" } },
+    { flag = "autoRankRewards", key = "rankreward", seconds = 5,
+      words = { "rank reward", "rank", "reward", "claim" } },
+    { flag = "autoForeverPack", key = "foreverpack", seconds = 4,
+      words = { "forever pack", "forever", "gift", "claim" } },
+    -- Main: Others
+    { flag = "autoBalloons", key = "balloon", seconds = 2,
+      words = { "balloon", "pop" } },
+    { flag = "autoStairwayExit", key = "stairway", seconds = 4,
+      words = { "stairway", "leave", "exit", "heaven" } },
     -- Mailbox
     { flag = "autoMail", key = "mail", seconds = 3,
       words = { "claim all", "collect all", "claim", "collect", "mail", "gift" } },
@@ -2852,6 +2934,27 @@ function Auto.tick()
     for _, rule in ipairs(AUTO_RULES) do
         if Flags[rule.flag] then
             Auto.use(rule.words, rule.key, Flags[rule.delayFlag] or rule.seconds, rule.avoid, rule.context)
+        end
+    end
+
+    -- Main: find switches. Both walk the map for a named part, then fire its
+    -- prompt or fly the character to it.
+    if Flags.autoShinyRelics then
+        Auto.flyToWords({ "shiny", "relic" }, "shiny", 8)
+    end
+    if Flags.autoAdminAbuse then
+        Auto.flyToWords({ "admin", "abuse" }, "admin", 10)
+    end
+
+    -- Main: secret keys sit behind an area gate, so the area button comes first
+    if Flags.autoTreehouse then
+        if Quest.gotoArea(15, Quest.areaWords) then
+            Auto.use({ "treehouse", "merchant" }, "treehouse", 6)
+        end
+    end
+    if Flags.autoCrystalKey then
+        if Quest.gotoArea(58, Quest.areaWords) then
+            Auto.use({ "crystal", "castle" }, "crystal", 6)
         end
     end
 end
@@ -3097,112 +3200,28 @@ addToggle(farmPage, "Auto Use TNT Crate", false, "autoTNTCrate")
 addNote(farmPage, "Every switch finds the game's own button by label and clicks it. Cooldowns are the sliders above; nothing is fired blind.", THEME.Sub)
 end
 
--- ---------- GAME ----------
-local GAME_PRESETS = {
-    PS99 = {
-        prompts = "hatch, egg, open, rebirth, rank, upgrade",
-        touch = "coin, gem, diamond, cash, money",
-        note = "Auto-hatch fires the egg ProximityPrompts in range. Auto-collect touches coin and gem parts. Turn the radius up to 90 for a full area sweep.",
-    },
-    PGO = {
-        prompts = "egg, hatch, open, rebirth, upgrade",
-        touch = "coin, gold, gem, cash, money",
-        note = "Same layout as PS99: egg prompts hatch, coin parts collect. Radius 60-90 covers most spawn areas.",
-    },
-    GAG = {
-        prompts = "plant, harvest, collect, sell, water, buy",
-        touch = "crop, fruit, seed, plant, harvest",
-        note = "Plant and harvest are prompts on the plots. Auto-collect touches crop and fruit parts. Keep the radius at 40 or you will fire neighbouring plots.",
-    },
-    ETFB = {
-        prompts = "escape, collect, open, rescue, brainrot",
-        touch = "brainrot, coin, cash, money",
-        note = "Collect touches brainrot parts. Escape prompts fire the exit interactions. Speed and fly live in Main if the round is going badly.",
-    },
-    UNIVERSAL = {
-        prompts = "",
-        touch = "coin, gem, cash, money",
-        note = "Game not recognised. Scan the prompts and parts first, then type the names you see into the filters on the Farm tab.",
-    },
-}
+-- ---------- MAIN ----------
+-- The Main tab is a fixed layout: Auto Claim, Others, Secret Key. The game
+-- preset plumbing that used to live here moved into the Farm tab's own
+-- switches, so this page no longer rebuilds itself on a dropdown.
+do
+addSection(gamePage, "Auto Claim")
+addToggle(gamePage, "Auto Claim Free Gifts", false, "autoFreeGifts")
+addToggle(gamePage, "Auto Claim Rank Rewards", false, "autoRankRewards")
+addToggle(gamePage, "Auto Claim Forever Pack Free Gifts", false, "autoForeverPack")
+addToggle(gamePage, "Auto Find Shiny Relics", false, "autoShinyRelics")
 
-local GAME_ORDER = { "PS99", "PGO", "GAG", "ETFB", "UNIVERSAL" }
+addSection(gamePage, "Others")
+addToggle(gamePage, "Auto Pop Balloons", false, "autoBalloons")
+addToggle(gamePage, "Auto Leave Stairway To Heaven", false, "autoStairwayExit")
+addToggle(gamePage, "Auto Find Admin Abuse Character ⭐", false, "autoAdminAbuse")
 
-local function labelToKey(label)
-    for _, key in ipairs(GAME_ORDER) do
-        if GAME_LABEL[key] == label then return key end
-    end
-    return "UNIVERSAL"
+addSection(gamePage, "Secret Key")
+addToggle(gamePage, "Auto Treehouse Merchant (Secret Key, Area 15)", false, "autoTreehouse")
+addToggle(gamePage, "Auto Crystal Key Castle (Secret Key, Area 58)", false, "autoCrystalKey")
+
+addNote(gamePage, "Detected: " .. DETECTED_NAME .. ". Every claim switch clicks a labelled button in the game's own UI. The find switches walk the map for the named object, then fire its prompt.", THEME.Sub)
 end
-
-local function gameLabels()
-    local out = {}
-    for _, key in ipairs(GAME_ORDER) do table.insert(out, GAME_LABEL[key]) end
-    return out
-end
-
-local function buildGamePage(key)
-    local page = gamePage
-    for _, child in ipairs(page.frame:GetChildren()) do
-        child:Destroy()
-    end
-    page.y = 12
-
-    local preset = GAME_PRESETS[key] or GAME_PRESETS.UNIVERSAL
-
-    addSection(page, GAME_LABEL[key] or "Universal")
-    addNote(page, "Detected: " .. DETECTED_NAME, THEME.Accent)
-    addDropdown(page, "Game", gameLabels, GAME_LABEL[key] or "Universal", "gamePick", function(label)
-        activeGame = labelToKey(label)
-        buildGamePage(activeGame)
-    end)
-
-    addSection(page, "One Tap")
-    addButton(page, "Apply Farm Preset", THEME.Accent, function()
-        T.promptFilter = preset.prompts
-        T.touchFilter = preset.touch
-        callSetter("promptFilter", preset.prompts)
-        callSetter("touchFilter", preset.touch)
-        callSetter("autoPrompt", true)
-        if CAP.touch then callSetter("autoTouch", true) end
-        notify(GAME_LABEL[key] .. " preset armed", "success")
-    end)
-    addButton(page, "Auto Hatch / Interact", THEME.Text, function()
-        T.promptFilter = preset.prompts
-        callSetter("promptFilter", preset.prompts)
-        callSetter("autoPrompt", true)
-        notify("Prompts on", "success")
-    end)
-    if CAP.touch then
-        addButton(page, "Auto Collect", THEME.Text, function()
-            T.touchFilter = preset.touch
-            callSetter("touchFilter", preset.touch)
-            callSetter("autoTouch", true)
-            notify("Collect on", "success")
-        end)
-    end
-    addButton(page, "Auto Click", THEME.Text, function()
-        callSetter("autoClick", true)
-        notify("Click on", "success")
-    end)
-    addButton(page, "Stop Everything", THEME.Red, function()
-        callSetter("autoPrompt", false)
-        callSetter("autoTouch", false)
-        callSetter("autoClick", false)
-        callSetter("autoKey", false)
-        notify("All automation off", "info")
-    end)
-
-    addSection(page, "Scan")
-    addButton(page, "Scan Prompts", THEME.Text, function() Toolkit.scanPrompts() end)
-    addButton(page, "Scan Collectibles", THEME.Text, function() Toolkit.scanParts() end)
-
-    addSection(page, "How This Works")
-    addNote(page, preset.note)
-    addNote(page, "Filters live on the Farm tab. Presets only fill them in and switch the toggles.", THEME.Sub)
-end
-
-buildGamePage(activeGame)
 
 -- ---------- PLAYER (visuals + teleport) ----------
 local vis = addTab("Player", "👤", 16)
@@ -3716,6 +3735,41 @@ function Quest.flyTo(num)
     end)
     track(conn)
     Quest.travelPart = target
+    return true
+end
+
+-- travels to a named area number: the secret-key merchants sit behind a gate
+-- at a fixed area, and the highest-unlocked rule would walk past them
+function Quest.gotoArea(num, words)
+    words = words or Quest.areaWords
+    local key = "area" .. tostring(num)
+    Quest.at = Quest.at or {}
+    if Quest.at[key] and (os.clock() - Quest.at[key]) < 20 then return false end
+    local found
+    eachGameGui(function(inst)
+        if (inst:IsA("GuiButton") or inst:IsA("TextLabel")) and isShown(inst) then
+            local text = cleanText(inst.Text or inst.Name or "")
+            local low = string.lower(text)
+            if #text >= 3 and #text <= 60 then
+                local hasWord = false
+                for _, w in ipairs(words) do
+                    if string.find(low, w, 1, true) then hasWord = true break end
+                end
+                local n = tonumber(string.match(low, "(%d+)"))
+                if hasWord and n == num then
+                    local target = clickable(inst)
+                    if target then
+                        found = target
+                        return false
+                    end
+                end
+            end
+        end
+        return nil
+    end)
+    if not found then return false end
+    if not PSX.click(found) then return false end
+    Quest.at[key] = os.clock()
     return true
 end
 
