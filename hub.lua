@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.3.0"
+local VERSION = "1.4.0"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -370,10 +370,16 @@ new("Frame", {
     BorderSizePixel = 0,
 }, rail)
 
-local tabHolder = new("Frame", {
+local tabHolder = new("ScrollingFrame", {
     Name = "Tabs",
     Size = UDim2.new(1, 0, 1, -36),
     BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    CanvasSize = UDim2.fromOffset(0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    ScrollBarThickness = 3,
+    ScrollBarImageColor3 = THEME.Stroke,
+    ScrollingDirection = Enum.ScrollingDirection.Y,
 }, rail)
 
 local welcome = new("Frame", {
@@ -526,10 +532,10 @@ local function addToggle(page, label, default, flag, cb)
     return set
 end
 
-local function addSlider(page, label, lo, hi, default, step, flag, cb)
+local function addSlider(page, label, lo, hi, default, step, flag, cb, suffix)
     local row = rowBase(page, 46)
     local name = new("TextLabel", {
-        Size = UDim2.new(1, -70, 0, 16),
+        Size = UDim2.new(1, -140, 0, 16),
         Position = UDim2.fromOffset(10, 7),
         BackgroundTransparency = 1,
         Text = label,
@@ -537,12 +543,13 @@ local function addSlider(page, label, lo, hi, default, step, flag, cb)
         Font = Enum.Font.GothamMedium,
         TextSize = 12,
         TextColor3 = THEME.Text,
+        TextTruncate = Enum.TextTruncate.AtEnd,
     }, row)
     local valueLbl = new("TextLabel", {
-        Size = UDim2.fromOffset(60, 16),
-        Position = UDim2.new(1, -70, 0, 7),
+        Size = UDim2.fromOffset(124, 16),
+        Position = UDim2.new(1, -134, 0, 7),
         BackgroundTransparency = 1,
-        Text = tostring(default),
+        Text = tostring(default) .. (suffix or ""),
         TextXAlignment = Enum.TextXAlignment.Right,
         Font = Enum.Font.GothamBold,
         TextSize = 11,
@@ -579,7 +586,7 @@ local function addSlider(page, label, lo, hi, default, step, flag, cb)
         local alpha = (value - lo) / (hi - lo)
         fill.Size = UDim2.fromScale(alpha, 1)
         knob.Position = UDim2.new(alpha, 0, 0.5, 0)
-        valueLbl.Text = tostring(value)
+        valueLbl.Text = tostring(value) .. (suffix or "")
         Flags[flag] = value
         if not silent and cb then task.spawn(cb, value) end
     end
@@ -1717,6 +1724,115 @@ end))
 
 Stops.Psx = function() Flags.psxAutoGoals = false end
 
+-- ============================================================
+-- QUEST
+-- ============================================================
+-- Same rule as PSX: no guessed remotes. Find the claim / gift button the game
+-- is showing and fire its click.
+local Quest = {
+    claimWords = { "claim", "collect", "complete", "redeem", "turn in" },
+    questWords = {
+        Daily = "daily", Rank = "rank", Clan = "clan",
+        Season = "season", Event = "event", Index = "index",
+    },
+}
+
+local function uiButtons(words, limit)
+    local out, seen = {}, 0
+    for _, inst in ipairs(PG:GetDescendants()) do
+        seen = seen + 1
+        if seen > GUI_SCAN_CAP then break end
+        if inst:IsA("GuiButton") and isShown(inst) then
+            local hay = string.lower(inst.Name) .. " " .. string.lower(inst.Text or "")
+            for _, w in ipairs(words) do
+                if string.find(hay, w, 1, true) then
+                    out[#out + 1] = inst
+                    break
+                end
+            end
+            if #out >= limit then break end
+        end
+    end
+    return out
+end
+
+local function matchesAny(btn, words)
+    if #words == 0 then return true end
+    local hay = string.lower(btn.Name) .. " " .. string.lower(btn.Text or "")
+    for _, w in ipairs(words) do
+        if string.find(hay, w, 1, true) then return true end
+    end
+    return false
+end
+
+function Quest.pass()
+    local maxRank = Flags.questMaxRank or 40
+    local questFilter = {}
+    local selected = Flags.questQuests
+    if type(selected) == "table" then
+        for _, name in ipairs(selected) do
+            local w = Quest.questWords[name]
+            if w then questFilter[#questFilter + 1] = w end
+        end
+    end
+
+    local fired = 0
+    local matched, rest = {}, {}
+    for _, btn in ipairs(uiButtons(Quest.claimWords, 60)) do
+        if matchesAny(btn, questFilter) then
+            matched[#matched + 1] = btn
+        else
+            rest[#rest + 1] = btn
+        end
+    end
+
+    -- selected ranks go first, the rest still get claimed: a filter that silently
+    -- does nothing is a dead widget
+    for _, list in ipairs({ matched, rest }) do
+        for _, btn in ipairs(list) do
+            if fired >= maxRank then break end
+            if PSX.click(btn) then fired = fired + 1 end
+        end
+    end
+
+    local gifts = 0
+    local giftSel = Flags.questGifts
+    if type(giftSel) == "table" and #giftSel > 0 then
+        local giftWords = {}
+        for _, name in ipairs(giftSel) do
+            giftWords[#giftWords + 1] = string.lower(name)
+        end
+        for _, btn in ipairs(uiButtons({ "gift" }, 12)) do
+            if gifts >= 3 then break end
+            if matchesAny(btn, giftWords) and PSX.click(btn) then
+                gifts = gifts + 1
+            end
+        end
+    end
+
+    return fired, gifts
+end
+
+Features.questPass = function()
+    local fired, gifts = Quest.pass()
+    if fired == 0 and gifts == 0 then
+        notify("No quest button on screen - open the Quest menu first", "error")
+    else
+        notify("Quests: " .. fired .. " claimed, " .. gifts .. " gifts opened", "success")
+    end
+end
+
+local questAcc = 0
+track(RunService.Heartbeat:Connect(function(dt)
+    if not Flags.questAuto then return end
+    questAcc = questAcc + dt
+    if questAcc < (Flags.questWait or 5) then return end
+    questAcc = 0
+    pcall(Quest.pass)
+end))
+
+Stops.Quest = function() Flags.questAuto = false end
+
 -- waypoints
 local CFG_DIR = "Tupachup"
 local WP_FILE = CFG_DIR .. "/waypoints.json"
@@ -2634,6 +2750,23 @@ if CAP.firesignal then
 else
     addNote(psx, "firesignal is missing on this executor - PSX buttons are off. Join still works if a PlaceId is set.", THEME.Red)
 end
+
+-- ---------- QUEST ----------
+local quest = addTab("Quest", "✦")
+
+addSection(quest, "Rank Quest")
+addSlider(quest, "Select Max Rank", 1, 40, 40, 1, "questMaxRank", nil, " Ranks")
+addMultiSelect(quest, "Select Rank Quests",
+    { "Daily", "Rank", "Clan", "Season", "Event", "Index" },
+    { "Daily", "Rank", "Clan", "Season", "Event", "Index" }, "questQuests")
+addSlider(quest, "Select Priority Quests Wait Time", 1, 30, 5, 1, "questWait", nil, " Seconds")
+addMultiSelect(quest, "Select Gifts To Open If Necessary",
+    { "Small Gift", "Medium Gift", "Large Gift", "Huge Gift", "Titanic Gift" },
+    { "Small Gift", "Medium Gift", "Large Gift", "Huge Gift", "Titanic Gift" }, "questGifts")
+addToggle(quest, "Auto Complete Selected Rank Quests", false, "questAuto")
+
+addButton(quest, "Complete Rank Quests Now", THEME.Accent, function() Features.questPass() end)
+addNote(quest, "Claims every visible Claim / Collect / Complete button, selected ranks first, up to Max Rank per pass. Open the Quest menu first.", THEME.Sub)
 
 -- ---------- MISC ----------
 local misc = addTab("Misc", "◍")
