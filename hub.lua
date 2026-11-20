@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.4.4"
+local VERSION = "1.5.0"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -100,7 +100,7 @@ local THEME = {
     Green  = Color3.fromRGB(86, 226, 140),
 }
 
-local WIN_W, WIN_H = 620, 410
+local WIN_W, WIN_H = 620, 442
 local TOP_H, RAIL_W, PAD = 42, 152, 12
 local ROW_W = WIN_W - RAIL_W - PAD * 2
 
@@ -475,7 +475,7 @@ new("Frame", {
 
 local tabHolder = new("ScrollingFrame", {
     Name = "Tabs",
-    Size = UDim2.new(1, 0, 1, -36),
+    Size = UDim2.new(1, 0, 1, -58),
     BackgroundTransparency = 1,
     BorderSizePixel = 0,
     CanvasSize = UDim2.fromOffset(0, 0),
@@ -485,11 +485,14 @@ local tabHolder = new("ScrollingFrame", {
     ScrollingDirection = Enum.ScrollingDirection.Y,
 }, rail)
 
+-- player card: avatar in a ring, "Welcome," and the display name
 local welcome = new("Frame", {
     Name = "Welcome",
-    Size = UDim2.new(1, 0, 0, 36),
-    Position = UDim2.new(0, 0, 1, -36),
-    BackgroundTransparency = 1,
+    Size = UDim2.new(1, 0, 0, 58),
+    Position = UDim2.new(0, 0, 1, -58),
+    BackgroundColor3 = THEME.Row,
+    BackgroundTransparency = 0.55,
+    BorderSizePixel = 0,
 }, rail)
 new("Frame", {
     Size = UDim2.new(1, -20, 0, 1),
@@ -497,15 +500,58 @@ new("Frame", {
     BackgroundColor3 = THEME.Stroke,
     BorderSizePixel = 0,
 }, welcome)
+
+local displayName = tostring(LP.DisplayName or LP.Name or "player")
+local shownName = #displayName > 15 and (string.sub(displayName, 1, 14) .. "...") or displayName
+
+local avatarHolder = new("Frame", {
+    Name = "Avatar",
+    Size = UDim2.fromOffset(34, 34),
+    Position = UDim2.fromOffset(10, 12),
+    BackgroundColor3 = THEME.Panel,
+    BorderSizePixel = 0,
+    ClipsDescendants = true,
+}, welcome)
+new("UICorner", { CornerRadius = UDim.new(1, 0) }, avatarHolder)
+new("UIStroke", { Color = THEME.Accent, Thickness = 1.5, Transparency = 0.25 }, avatarHolder)
+
+-- the letter shows through when the thumbnail has not loaded yet
 new("TextLabel", {
-    Size = UDim2.new(1, -20, 1, 0),
-    Position = UDim2.fromOffset(12, 0),
+    Size = UDim2.fromScale(1, 1),
     BackgroundTransparency = 1,
-    Text = "Welcome, " .. string.sub(tostring(LP.DisplayName or LP.Name or "player"), 1, 14),
+    Text = string.sub(displayName, 1, 1):upper(),
+    Font = Enum.Font.GothamBlack,
+    TextSize = 14,
+    TextColor3 = THEME.Accent,
+}, avatarHolder)
+local avatarImage = new("ImageLabel", {
+    Name = "Thumb",
+    Size = UDim2.fromScale(1, 1),
+    BackgroundTransparency = 1,
+    Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(LP.UserId) .. "&w=150&h=150",
+    ScaleType = Enum.ScaleType.Crop,
+}, avatarHolder)
+new("UICorner", { CornerRadius = UDim.new(1, 0) }, avatarImage)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -56, 0, 13),
+    Position = UDim2.fromOffset(52, 13),
+    BackgroundTransparency = 1,
+    Text = "Welcome,",
     TextXAlignment = Enum.TextXAlignment.Left,
     Font = Enum.Font.GothamMedium,
-    TextSize = 11,
+    TextSize = 10,
     TextColor3 = THEME.Sub,
+}, welcome)
+new("TextLabel", {
+    Size = UDim2.new(1, -56, 0, 16),
+    Position = UDim2.fromOffset(52, 27),
+    BackgroundTransparency = 1,
+    Text = shownName,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Font = Enum.Font.GothamBold,
+    TextSize = 12,
+    TextColor3 = THEME.Text,
     TextTruncate = Enum.TextTruncate.AtEnd,
 }, welcome)
 
@@ -2905,6 +2951,15 @@ local Quest = {
         Daily = "daily", Rank = "rank", Clan = "clan",
         Season = "season", Event = "event", Index = "index",
     },
+    -- the game's own quest button, so the runner never needs the panel opened
+    -- by hand
+    panelWords = { "quest", "mission", "task", "objective", "rank quest" },
+    -- area / world map labels: highest unlocked number wins
+    areaWords = {
+        "area", "zone", "world", "biome", "island", "map",
+        "stage", "realm", "land", "dimension", "location",
+    },
+    lockedWords = { "lock", "require", "need", "buy", "unlock", "not enough", "too weak" },
     -- requirement keyword -> what the farm toolkit has to do about it
     plan = {
         breakable = {
@@ -3166,36 +3221,109 @@ function Quest.setStatus(text, color)
     end
 end
 
+-- the game's own quest button. Clicking it is how the panel opens, so the
+-- player never has to press Read first.
+function Quest.openPanel()
+    local btn = PSX.findButton(Quest.panelWords)
+    if not btn then return false end
+    if not PSX.click(btn) then return false end
+    Quest.openedAt = os.clock()
+    return true
+end
+
+-- highest unlocked area the world map is offering
+function Quest.bestArea()
+    local best, bestNum, seen = nil, -1, 0
+    for _, inst in ipairs(PG:GetDescendants()) do
+        seen = seen + 1
+        if seen > GUI_SCAN_CAP then break end
+        if (inst:IsA("GuiButton") or inst:IsA("TextLabel")) and isShown(inst) then
+            local text = cleanText(inst.Text or inst.Name or "")
+            local low = string.lower(text)
+            if #text >= 3 and #text <= 60 then
+                local isArea = false
+                for _, w in ipairs(Quest.areaWords) do
+                    if string.find(low, w, 1, true) then isArea = true break end
+                end
+                if isArea then
+                    local locked = false
+                    for _, w in ipairs(Quest.lockedWords) do
+                        if string.find(low, w, 1, true) then locked = true break end
+                    end
+                    local num = tonumber(string.match(low, "(%d+)"))
+                    if not locked and num and num > bestNum then
+                        bestNum, best = num, inst
+                    end
+                end
+            end
+        end
+    end
+    return best, bestNum
+end
+
+-- moves the character with the game's own area button, never a guessed remote
+function Quest.travel(force)
+    local btn, num = Quest.bestArea()
+    if not btn then return false, 0 end
+    local now = os.clock()
+    if not force and Quest.area == num and (now - (Quest.areaAt or 0)) < 45 then
+        return false, num
+    end
+    if not PSX.click(btn) then return false, num end
+    Quest.area, Quest.areaAt = num, now
+    return true, num
+end
+
 function Quest.cycle()
     local reqs = Quest.read()
+
+    -- nothing readable: click the game's quest button, then look again
+    if #reqs == 0 then
+        if (Quest.panelTries or 0) < 3 and Quest.openPanel() then
+            Quest.panelTries = (Quest.panelTries or 0) + 1
+            Quest.setStatus("Opening the quest panel...", THEME.Accent)
+            task.delay(0.7, function()
+                if Flags.questAuto or Quest.manual then pcall(Quest.cycle) end
+            end)
+            return 0, 0, 0, {}
+        end
+        Quest.setStatus("No quest panel found. Open it once in game - the runner reads it from then on.", THEME.Red)
+        return 0, 0, 0, {}
+    end
+
+    Quest.panelTries = 0
+
     local keys = {}
     for _, r in ipairs(reqs) do keys[r.key] = true end
 
     local applied = Quest.arm(keys)
+    local travelled, area = false, 0
+    if Flags.questTravel then
+        travelled, area = Quest.travel()
+    end
     local fired, gifts = Quest.claim()
     Quest.cycles = Quest.cycles + 1
 
-    if #reqs == 0 then
-        Quest.setStatus("No quest text on screen. Open the Rank Quest panel, then toggle again.", THEME.Red)
-    else
-        local tools = (#applied > 0) and table.concat(applied, ", ") or "already armed"
-        Quest.setStatus(
-            ("%d quests (%s) - tools: %s - claimed %d, gifts %d")
-                :format(#reqs, listKeys(reqs), tools, fired, gifts),
-            THEME.Sub
-        )
-    end
+    local tools = (#applied > 0) and table.concat(applied, ", ") or "already armed"
+    Quest.setStatus(
+        ("%d quests - %s - %s%s - claimed %d")
+            :format(#reqs, reqs[1] and reqs[1].text or "?", tools,
+                travelled and (" - area " .. area) or "", fired),
+        THEME.Sub
+    )
 
     return fired, gifts, #reqs, applied
 end
 
 Features.questPass = function()
+    Quest.manual = true
+    task.delay(2, function() Quest.manual = false end)
     local fired, gifts, count = Quest.cycle()
     if count == 0 then
-        notify("No quest panel on screen - open the Rank Quest tab in game first", "error")
+        notify("No quests read yet - opening the panel and retrying", "info", "Quest")
     else
         notify(("Quests: %d read, %d claimed, %d gifts - %s")
-            :format(count, fired, gifts, listKeys(Quest.reqs)), "success")
+            :format(count, fired, gifts, listKeys(Quest.reqs)), "success", "Quest")
     end
     return fired
 end
@@ -3254,12 +3382,13 @@ addMultiSelect(quest, "Select Gifts To Open If Necessary",
 addToggle(quest, "Auto Complete Selected Rank Quests", false, "questAuto", function(on)
     Features.questAuto(on)
 end)
+addToggle(quest, "Travel To Best Unlocked Area", true, "questTravel")
 
 addButton(quest, "Read Rank Quests", THEME.Text, function() Features.questRead() end)
 addButton(quest, "Complete Rank Quests Now", THEME.Accent, function() Features.questPass() end)
 
-questStatusLabel = addNote(quest, "Idle. Open the Rank Quest panel, then switch Auto Complete on.", THEME.Sub)
-addNote(quest, "Reads the requirement lines on screen, arms the matching farm tool, then fires the Claim buttons. Tools restore when switched off.", THEME.Sub)
+questStatusLabel = addNote(quest, "Idle. Switch Auto Complete on - the runner opens the panel itself.", THEME.Sub)
+addNote(quest, "Reads the requirement lines, moves to the highest unlocked area, arms the matching farm tool, then claims. Tools restore when switched off.", THEME.Sub)
 
 -- ---------- MISC ----------
 local misc = addTab("Misc")
