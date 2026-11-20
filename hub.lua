@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.5.1"
+local VERSION = "1.6.0"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -2176,6 +2176,11 @@ local function tapKey(code)
     end)
 end
 
+-- forward declarations: the heartbeat below calls into both, and both modules
+-- are defined further down the file
+local Auto, Quest
+local autoAcc = 0
+
 track(RunService.Heartbeat:Connect(function(dt)
     dt = dt or 0
 
@@ -2223,13 +2228,22 @@ track(RunService.Heartbeat:Connect(function(dt)
     if T.clickOn and clickAcc >= (1 / math.max(T.clickCps, 1)) then
         clickAcc = 0
         local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
-        clickAt(Vector2.new(vp.X / 2, vp.Y / 2))
+        local pos = (Auto and Auto.tapPoint) and Auto.tapPoint(vp) or Vector2.new(vp.X / 2, vp.Y / 2)
+        clickAt(pos)
     end
 
     keyAcc = keyAcc + dt
     if T.keyOn and keyAcc >= 0.12 then
         keyAcc = 0
         tapKey(T.keyCode)
+    end
+
+    -- the Auto Farm tab: one pass every half second, each feature throttled
+    -- inside Auto.use by its own cooldown
+    autoAcc = autoAcc + dt
+    if autoAcc >= 0.5 then
+        autoAcc = 0
+        if Auto and Auto.tick then pcall(Auto.tick) end
     end
 end))
 
@@ -2583,6 +2597,218 @@ Stops.Protect = function()
 end
 
 -- ============================================================
+-- AUTO FARM ENGINE
+-- ============================================================
+-- Every feature here is a labelled button in the game's own UI. Nothing fires
+-- a guessed remote: the engine finds the button by text, then clicks it.
+Auto = {
+    last = {},          -- feature key -> os.clock of the last click
+    tapMode = "Random",
+    miscItem = "Basic Coin Jar",
+    flagItem = "Strength Flag",
+    breakables = {},
+    breakablesAt = 0,
+}
+
+local AUTO_BREAK_WORDS = {
+    "breakable", "chest", "coin", "jar", "crate", "rock", "ore", "tree",
+    "crystal", "gem", "box", "barrel", "vault",
+}
+
+local function autoThrottle(key, seconds)
+    local now = os.clock()
+    if now - (Auto.last[key] or 0) < seconds then return false end
+    Auto.last[key] = now
+    return true
+end
+
+-- words: at least one must appear. avoid: none may appear. context: if given,
+-- at least one of these must also appear.
+local function autoFind(words, avoid, context)
+    local seen = 0
+    for _, inst in ipairs(PG:GetDescendants()) do
+        seen = seen + 1
+        if seen > GUI_SCAN_CAP then break end
+        if inst:IsA("GuiButton") and isShown(inst) then
+            local hay = string.lower(inst.Name) .. " " .. string.lower(inst.Text or "")
+            local hit = false
+            for _, w in ipairs(words) do
+                if string.find(hay, w, 1, true) then hit = true break end
+            end
+            if hit then
+                local blocked = false
+                for _, w in ipairs(avoid or {}) do
+                    if string.find(hay, w, 1, true) then blocked = true break end
+                end
+                if not blocked and context and #context > 0 then
+                    blocked = true
+                    for _, w in ipairs(context) do
+                        if string.find(hay, w, 1, true) then blocked = false break end
+                    end
+                end
+                if not blocked then return inst end
+            end
+        end
+    end
+    return nil
+end
+
+function Auto.use(words, key, seconds, avoid, context)
+    if not autoThrottle(key, seconds) then return false end
+    local btn = autoFind(words, avoid, context)
+    if not btn then return false end
+    return PSX.click(btn)
+end
+
+-- dropdown food: the names the game is actually showing
+function Auto.options(words, fallback, cap)
+    local out, seen = {}, {}
+    local scanned = 0
+    for _, inst in ipairs(PG:GetDescendants()) do
+        scanned = scanned + 1
+        if scanned > GUI_SCAN_CAP then break end
+        if inst:IsA("GuiButton") and isShown(inst) then
+            local text = cleanText(inst.Text or "")
+            local low = string.lower(text)
+            if #text >= 3 and #text <= 28 and not seen[low] then
+                for _, w in ipairs(words) do
+                    if string.find(low, w, 1, true) then
+                        seen[low] = true
+                        out[#out + 1] = text
+                        break
+                    end
+                end
+            end
+            if #out >= cap then break end
+        end
+    end
+    if #out == 0 then return fallback end
+    table.sort(out)
+    return out
+end
+
+function Auto.refreshBreakables()
+    local now = os.clock()
+    if now - Auto.breakablesAt < 1 then return end
+    Auto.breakablesAt = now
+    local out, scanned = {}, 0
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        scanned = scanned + 1
+        if scanned > 9000 then break end
+        if obj:IsA("BasePart") then
+            local low = string.lower(obj.Name)
+            for _, w in ipairs(AUTO_BREAK_WORDS) do
+                if string.find(low, w, 1, true) then
+                    out[#out + 1] = obj
+                    break
+                end
+            end
+            if #out >= 250 then break end
+        end
+    end
+    Auto.breakables = out
+end
+
+function Auto.nearestBreakable()
+    local hrp = root()
+    local cam = workspace.CurrentCamera
+    if not hrp or not cam then return nil end
+    Auto.refreshBreakables()
+    local best, bestDist
+    for _, part in ipairs(Auto.breakables) do
+        if part.Parent then
+            local d = (part.Position - hrp.Position).Magnitude
+            if d < 300 and (not bestDist or d < bestDist) then
+                bestDist, best = d, part
+            end
+        end
+    end
+    if not best then return nil end
+    local screen, onScreen = cam:WorldToViewportPoint(best.Position)
+    if not onScreen then return nil end
+    return Vector2.new(screen.X, screen.Y)
+end
+
+function Auto.tapPoint(vp)
+    if Auto.tapMode == "Center" then
+        return Vector2.new(vp.X / 2, vp.Y / 2)
+    elseif Auto.tapMode == "Nearest Breakable" then
+        local p = Auto.nearestBreakable()
+        if p then return p end
+    elseif Auto.tapMode == "Screen Edges" then
+        local edge = math.random(1, 4)
+        local x = (edge == 1) and 60 or (edge == 2) and (vp.X - 60) or math.random(80, math.max(81, math.floor(vp.X - 80)))
+        local y = (edge == 3) and 80 or (edge == 4) and (vp.Y - 80) or math.random(80, math.max(81, math.floor(vp.Y - 80)))
+        return Vector2.new(x, y)
+    end
+    return Vector2.new(
+        math.random(70, math.max(71, math.floor(vp.X - 70))),
+        math.random(70, math.max(71, math.floor(vp.Y - 70)))
+    )
+end
+
+function Auto.tick()
+    -- keeps re-applying so the game cannot drop the speed back down
+    if Flags.infinitePetSpeed then
+        local _, hum = char()
+        if hum and hum.WalkSpeed ~= 200 then hum.WalkSpeed = 200 end
+    end
+
+    if Flags.autoUltimate then Auto.use({ "ultimate" }, "ultimate", 1) end
+    if Flags.autoBestArea then Quest.travel(false, Quest.areaWords, "area") end
+    if Flags.autoBestWorld then Quest.travel(false, Quest.worldWords, "world") end
+    if Flags.autoBuyArea then
+        Auto.use({ "buy", "unlock", "purchase" }, "buyArea", 3, nil, Quest.areaWords)
+    end
+    if Flags.autoRebirth then Auto.use({ "rebirth" }, "rebirth", 5) end
+
+    if Flags.autoMisc and Auto.miscItem and Auto.miscItem ~= "" then
+        Auto.use({ string.lower(Auto.miscItem) }, "misc", 2)
+    end
+    if Flags.autoFlag and Auto.flagItem and Auto.flagItem ~= "" then
+        Auto.use({ string.lower(Auto.flagItem) }, "flag", 2)
+    end
+    if Flags.autoSprinkler then Auto.use({ "sprinkler" }, "sprinkler", 5) end
+
+    if Flags.autoTNT then
+        Auto.use({ "tnt" }, "tnt", Flags.tntDelay or 7.5, { "crate" })
+    end
+    if Flags.autoTNTCrate then
+        Auto.use({ "tnt crate", "crate" }, "tntcrate", Flags.tntCrateDelay or 15)
+    end
+end
+
+-- the quest runner arms the same engine through these flags
+bind("autoPrompt", function(v)
+    Flags.autoPrompt = v and true or false
+    T.promptOn = Flags.autoPrompt
+end)
+bind("autoTouch", function(v)
+    Flags.autoTouch = v and true or false
+    T.touchOn = Flags.autoTouch
+end)
+bind("autoClick", function(v)
+    Flags.autoClick = v and true or false
+    T.clickOn = Flags.autoClick
+end)
+bind("promptFilter", function(v)
+    Flags.promptFilter = (v == nil) and "" or tostring(v)
+    T.promptFilter = Flags.promptFilter
+end)
+bind("touchFilter", function(v)
+    Flags.touchFilter = (v == nil) and "" or tostring(v)
+    T.touchFilter = Flags.touchFilter
+end)
+bind("promptRadius", function(v)
+    Flags.promptRadius = tonumber(v) or 45
+    T.promptRadius = Flags.promptRadius
+end)
+bind("clickCps", function(v)
+    Flags.clickCps = tonumber(v) or 8
+    T.clickCps = Flags.clickCps
+end)
+
+-- ============================================================
 -- PAGES
 -- ============================================================
 local pages = {}
@@ -2704,51 +2930,82 @@ addSlider(main, "Fly Speed", 10, 300, 50, 1, "flySpeed", function(v) Features.fl
 
 -- ---------- GAMES + AUTO FARM ----------
 local gamePage = addTab("Games")
+-- the whole farm page lives in its own block: the compiler frees its locals at
+-- the end, and the main chunk is already near the 200-local ceiling.
+-- callSetter stays outside because the quest runner drives the same flags.
+local callSetter
+do
 local farmPage = addTab("Auto Farm")
 
-local function callSetter(flag, v)
+function callSetter(flag, v)
     if Setters[flag] then pcall(Setters[flag], v) end
 end
 
-addSection(farmPage, "Proximity Prompts")
-addToggle(farmPage, "Auto Prompts", false, "autoPrompt", function(on) T.promptOn = on end)
-addSlider(farmPage, "Prompt Radius", 10, 150, 45, 5, "promptRadius", function(v) T.promptRadius = v end)
-addTextbox(farmPage, "Prompt Filter", "hatch, egg, collect", "promptFilter", function(text) T.promptFilter = text end)
-
-addSection(farmPage, "Collectibles")
-if CAP.touch then
-    addToggle(farmPage, "Auto Touch Collect", false, "autoTouch", function(on) T.touchOn = on end)
-else
-    addNote(farmPage, "firetouchinterest missing on this executor - touch collect off.", THEME.Red)
-end
-addTextbox(farmPage, "Name Filter", "coin, gem, cash", "touchFilter", function(text) T.touchFilter = text end)
-
-addSection(farmPage, "Click / Keys")
-addToggle(farmPage, "Auto Click", false, "autoClick", function(on) T.clickOn = on end)
-addSlider(farmPage, "Clicks Per Second", 1, 30, 8, 1, "clickCps", function(v) T.clickCps = v end)
-if CAP.keypress then
-    addToggle(farmPage, "Auto Keypress", false, "autoKey", function(on) T.keyOn = on end)
-    addKeybind(farmPage, "Key", Enum.KeyCode.E, "autoKeyCode", function(key) T.keyCode = key end)
-else
-    addNote(farmPage, "keypress missing on this executor - auto keypress off.", THEME.Red)
-end
-
-addSection(farmPage, "Tools")
-addButton(farmPage, "Scan Proximity Prompts", THEME.Text, function() Toolkit.scanPrompts() end)
-addButton(farmPage, "Scan Collectible Parts", THEME.Text, function() Toolkit.scanParts() end)
-addButton(farmPage, "Scan Remotes", THEME.Text, function() Toolkit.scanRemotes() end)
-
-addSection(farmPage, "Remote Firer")
-addDropdown(farmPage, "Remote", remotePaths, "-", "remotePath")
-local argsBox = addTextbox(farmPage, "Args", "1, true, \"text\"", "remoteArgs")
-addButton(farmPage, "Fire Remote", THEME.Text, function()
-    local path = Flags.remotePath
-    if not path or path == "-" then
-        notify("Pick a remote first", "error")
-        return
-    end
-    Toolkit.fireRemote(path, argsBox.Text)
+addSection(farmPage, "Auto Farm")
+addToggle(farmPage, "Infinite Pet Speed", false, "infinitePetSpeed", function(on)
+    local _, hum = char()
+    if not hum then return end
+    hum.WalkSpeed = on and 200 or baseWalk
 end)
+
+local TAP_MODES = { "Random", "Center", "Nearest Breakable", "Screen Edges" }
+addDropdown(farmPage, "Auto Tap Mode", function() return TAP_MODES end, "Random", "tapMode",
+    function(v) Auto.tapMode = v end)
+
+addToggle(farmPage, "Auto Tap", false, "autoTap", function(on)
+    callSetter("autoClick", on)
+end)
+
+addToggle(farmPage, "Auto Efficient Farm (Fast Farm)", false, "fastFarm", function(on)
+    if on then
+        callSetter("autoPrompt", true)
+        callSetter("promptFilter", "")
+        callSetter("touchFilter", "")
+        if CAP.touch then callSetter("autoTouch", true) end
+        callSetter("autoClick", true)
+        Quest.travel(false, Quest.areaWords, "area")
+        notify("Fast farm: prompts, orbs and tap are on", "success", "Auto Farm")
+    else
+        callSetter("autoPrompt", false)
+        callSetter("autoTouch", false)
+        callSetter("autoClick", false)
+    end
+end)
+
+addToggle(farmPage, "Auto Collect Orbs", false, "autoOrbs", function(on)
+    callSetter("autoTouch", on)
+end)
+
+addToggle(farmPage, "Auto Use Ultimate", false, "autoUltimate")
+addToggle(farmPage, "Auto Teleport To Best Area", false, "autoBestArea")
+addToggle(farmPage, "Auto Buy Next Area", false, "autoBuyArea")
+addToggle(farmPage, "Auto Rebirth", false, "autoRebirth")
+addToggle(farmPage, "Auto Teleport To Best World", false, "autoBestWorld")
+
+addSection(farmPage, "Auto Use Items")
+local MISC_FALLBACK = { "Basic Coin Jar", "Coin Jar", "Potion", "Booster", "Chest" }
+addDropdown(farmPage, "Select a Misc Item",
+    function() return Auto.options({ "jar", "potion", "booster", "item", "orb", "chest" }, MISC_FALLBACK, 24) end,
+    "Basic Coin Jar", "miscItem", function(v) Auto.miscItem = v end)
+
+addToggle(farmPage, "Auto Use Misc Item", false, "autoMisc")
+
+local FLAG_FALLBACK = { "Strength Flag", "Speed Flag", "Coin Flag", "Luck Flag" }
+addDropdown(farmPage, "Select a Flag",
+    function() return Auto.options({ "flag" }, FLAG_FALLBACK, 24) end,
+    "Strength Flag", "flagItem", function(v) Auto.flagItem = v end)
+
+addToggle(farmPage, "Auto Use Flag", false, "autoFlag")
+addToggle(farmPage, "Auto Use Breakable Sprinkler", false, "autoSprinkler")
+
+addSection(farmPage, "TNT")
+addSlider(farmPage, "TNT Delay", 1, 30, 7.5, 0.5, "tntDelay", nil, " Seconds")
+addToggle(farmPage, "Auto Use TNT", false, "autoTNT")
+addSlider(farmPage, "TNT Crate Delay", 1, 60, 15, 0.5, "tntCrateDelay", nil, " Seconds")
+addToggle(farmPage, "Auto Use TNT Crate", false, "autoTNTCrate")
+
+addNote(farmPage, "Every switch finds the game's own button by label and clicks it. Cooldowns are the sliders above; nothing is fired blind.", THEME.Sub)
+end
 
 -- ---------- GAME ----------
 local GAME_PRESETS = {
@@ -2948,7 +3205,7 @@ end
 -- Breakables", "Hatch 20 Eggs", "Collect 5,000 Coins". Nothing here guesses a
 -- remote. The requirement line decides which farm tool gets armed, and claim
 -- buttons are fired through their own MouseButton1Click.
-local Quest = {
+Quest = {
     claimWords = { "claim", "collect", "complete", "redeem", "turn in" },
     questWords = {
         Daily = "daily", Rank = "rank", Clan = "clan",
@@ -2963,6 +3220,7 @@ local Quest = {
         "stage", "realm", "land", "dimension", "location",
     },
     lockedWords = { "lock", "require", "need", "buy", "unlock", "not enough", "too weak" },
+    worldWords = { "world", "dimension", "realm", "universe", "galaxy", "planet" },
     -- requirement keyword -> what the farm toolkit has to do about it
     plan = {
         breakable = {
@@ -3285,7 +3543,8 @@ local function clickable(inst)
 end
 
 -- highest unlocked area the world map is offering
-function Quest.bestArea()
+function Quest.bestArea(words)
+    words = words or Quest.areaWords
     local best, bestNum, seen = nil, -1, 0
     for _, inst in ipairs(PG:GetDescendants()) do
         seen = seen + 1
@@ -3295,7 +3554,7 @@ function Quest.bestArea()
             local low = string.lower(text)
             if #text >= 3 and #text <= 60 then
                 local isArea = false
-                for _, w in ipairs(Quest.areaWords) do
+                for _, w in ipairs(words) do
                     if string.find(low, w, 1, true) then isArea = true break end
                 end
                 if isArea then
@@ -3373,24 +3632,29 @@ function Quest.flyTo(num)
 end
 
 -- moves the character with the game's own area button, never a guessed remote
-function Quest.travel(force)
-    local btn, num = Quest.bestArea()
+function Quest.travel(force, words, key)
+    key = key or "area"
+    local btn, num = Quest.bestArea(words)
     if not btn then return false, 0 end
+    Quest.travelState = Quest.travelState or {}
+    local state = Quest.travelState[key] or {}
+    Quest.travelState[key] = state
     local now = os.clock()
-    if not force and Quest.area == num and (now - (Quest.areaAt or 0)) < 45 then
+    if not force and state.num == num and (now - (state.at or 0)) < 45 then
         return false, num
     end
     if not PSX.click(btn) then return false, num end
-    Quest.area, Quest.areaAt = num, now
+    state.num, state.at = num, now
 
     -- the button may only open a preview; if the character has not moved in a
     -- second and a half, fly to the area part instead
     if Flags.questFly then
-        local startPos = root() and root().Position
+        local hrp = root()
+        local startPos = hrp and hrp.Position
         task.delay(1.5, function()
-            local hrp = root()
-            if not hrp or not startPos then return end
-            if (hrp.Position - startPos).Magnitude < 6 then
+            local hrpNow = root()
+            if not hrpNow or not startPos then return end
+            if (hrpNow.Position - startPos).Magnitude < 6 then
                 pcall(Quest.flyTo, num)
             end
         end)
@@ -3839,6 +4103,8 @@ getgenv().Tupachup = {
     Features = Features,
     Toolkit = Toolkit,
     Quest = Quest,
+    Auto = Auto,
+    CallSetter = callSetter,
     Protect = Protect,
     Game = activeGame,
     Detected = DETECTED_NAME,
