@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.4.0"
+local VERSION = "1.4.1"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -661,15 +661,21 @@ local function addCopyRow(page, label, value, note)
         TextColor3 = THEME.Text,
         TextTruncate = Enum.TextTruncate.AtEnd,
     }, row)
-    local glyph = new("TextLabel", {
-        Size = UDim2.fromOffset(20, 20),
-        Position = UDim2.new(1, -28, 0.5, -10),
-        BackgroundTransparency = 1,
-        Text = "⧉",
-        Font = Enum.Font.GothamBold,
-        TextSize = 14,
-        TextColor3 = THEME.Sub,
+    -- drawn icon, not a glyph: Gotham renders ⧉ as a tofu box
+    local glyph = new("Frame", {
+        Size = UDim2.fromOffset(9, 9),
+        Position = UDim2.new(1, -22, 0.5, -4),
+        BackgroundColor3 = THEME.Sub,
+        BorderSizePixel = 0,
     }, row)
+    new("UICorner", { CornerRadius = UDim.new(0, 2) }, glyph)
+    local glyphCut = new("Frame", {
+        Size = UDim2.fromOffset(9, 9),
+        Position = UDim2.fromOffset(3, 3),
+        BackgroundColor3 = THEME.Row,
+        BorderSizePixel = 0,
+    }, glyph)
+    new("UICorner", { CornerRadius = UDim.new(0, 2) }, glyphCut)
     local hit = new("TextButton", {
         Size = UDim2.fromScale(1, 1),
         BackgroundTransparency = 1,
@@ -677,11 +683,11 @@ local function addCopyRow(page, label, value, note)
     }, row)
     hit.MouseEnter:Connect(function()
         TweenService:Create(row, TweenInfo.new(0.12), { BackgroundColor3 = THEME.Stroke }):Play()
-        glyph.TextColor3 = THEME.Accent
+        glyph.BackgroundColor3 = THEME.Accent
     end)
     hit.MouseLeave:Connect(function()
         TweenService:Create(row, TweenInfo.new(0.12), { BackgroundColor3 = THEME.Row }):Play()
-        glyph.TextColor3 = THEME.Sub
+        glyph.BackgroundColor3 = THEME.Sub
     end)
     hit.MouseButton1Click:Connect(function()
         copy(value)
@@ -2415,14 +2421,20 @@ local pages = {}
 local tabButtons = {}
 local selectedTab
 
-local function addTab(name, glyph)
+-- Roblox's Gotham font has no coverage for the symbol glyphs a web mock uses,
+-- so the sidebar draws a shape instead of a character. Tofu boxes are worse
+-- than no icon: the dot always renders.
+local tabIndex = 0
+
+local function addTab(name)
     local page = makePage()
     pages[name] = page
 
-    local idx = #tabButtons + 1
+    tabIndex = tabIndex + 1
+    local idx = tabIndex
     local btn = new("TextButton", {
         Size = UDim2.new(1, -14, 0, 30),
-        Position = UDim2.fromOffset(7, 8 + (idx - 1) * 32),
+        Position = UDim2.fromOffset(7, 6 + (idx - 1) * 32),
         BackgroundColor3 = THEME.Row,
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
@@ -2440,11 +2452,19 @@ local function addTab(name, glyph)
     }, btn)
     new("UICorner", { CornerRadius = UDim.new(1, 0) }, marker)
 
+    local dot = new("Frame", {
+        Size = UDim2.fromOffset(5, 5),
+        Position = UDim2.fromOffset(12, 12),
+        BackgroundColor3 = THEME.Sub,
+        BorderSizePixel = 0,
+    }, btn)
+    new("UICorner", { CornerRadius = UDim.new(1, 0) }, dot)
+
     local label = new("TextLabel", {
-        Size = UDim2.new(1, -24, 1, 0),
-        Position = UDim2.fromOffset(18, 0),
+        Size = UDim2.new(1, -34, 1, 0),
+        Position = UDim2.fromOffset(24, 0),
         BackgroundTransparency = 1,
-        Text = glyph .. "   " .. name,
+        Text = name,
         TextXAlignment = Enum.TextXAlignment.Left,
         Font = Enum.Font.GothamMedium,
         TextSize = 12,
@@ -2471,6 +2491,7 @@ local function addTab(name, glyph)
             local isSel = (tabName == name)
             b.btn.BackgroundTransparency = isSel and 0 or 1
             b.label.TextColor3 = isSel and THEME.Text or THEME.Sub
+            b.dot.BackgroundColor3 = isSel and THEME.Accent or THEME.Sub
             b.marker.Visible = isSel
         end
         selectedTab = name
@@ -2481,6 +2502,7 @@ local function addTab(name, glyph)
     tabButtons[name] = {
         btn = btn,
         marker = marker,
+        dot = dot,
         label = label,
     }
 
@@ -2492,7 +2514,7 @@ local function addTab(name, glyph)
 end
 
 -- ---------- HOME ----------
-local main = addTab("Home", "⌂")
+local main = addTab("Home")
 
 addSection(main, "Credits")
 addNote(main, BRAND .. " v" .. VERSION .. " - built and maintained by the " .. BRAND .. " team.", THEME.Sub)
@@ -2513,8 +2535,8 @@ addToggle(main, "Fly", false, "fly", function(v) Features.fly(v) end)
 addSlider(main, "Fly Speed", 10, 300, 50, 1, "flySpeed", function(v) Features.flySpeed(v) end)
 
 -- ---------- GAMES + AUTO FARM ----------
-local gamePage = addTab("Games", "★")
-local farmPage = addTab("Auto Farm", "⚡")
+local gamePage = addTab("Games")
+local farmPage = addTab("Auto Farm")
 
 local function callSetter(flag, v)
     if Setters[flag] then pcall(Setters[flag], v) end
@@ -2668,7 +2690,7 @@ end
 buildGamePage(activeGame)
 
 -- ---------- VISUALS ----------
-local vis = addTab("Visuals", "◉")
+local vis = addTab("Visuals")
 addSection(vis, "Players")
 addToggle(vis, "Player ESP", false, "esp", function(v) Features.esp(v) end)
 addToggle(vis, "ESP Names + Health", false, "espNames", function(v) Features.espNames(v) end)
@@ -2677,7 +2699,7 @@ addToggle(vis, "Fullbright", false, "fullbright", function(v) Features.fullbrigh
 addSlider(vis, "Camera FOV", 70, 120, 70, 1, "fov", function(v) Features.fov(v) end)
 
 -- ---------- TELEPORT ----------
-local tp = addTab("Teleport", "◎")
+local tp = addTab("Teleport")
 addSection(tp, "Waypoints")
 local wpName = addTextbox(tp, "Name", "spawn", "wpName")
 addButton(tp, "Save Current Position", THEME.Text, function()
@@ -2696,7 +2718,7 @@ end)
 addButton(tp, "Teleport To Cursor", THEME.Text, function() Features.tpMouse() end)
 
 -- ---------- WEBHOOK ----------
-local hook = addTab("Webhook", "✉")
+local hook = addTab("Webhook")
 addSection(hook, "Discord Webhook")
 local hookBox = addTextbox(hook, "URL", "https://discord.com/api/webhooks/...", "webhookUrl")
 addButton(hook, "Send Test Message", THEME.Text, function()
@@ -2709,7 +2731,7 @@ else
 end
 
 -- ---------- OPTIMIZATION ----------
-local opt = addTab("Optimization", "◐")
+local opt = addTab("Optimization")
 
 addSection(opt, "Game Objects")
 addToggle(opt, "Disable Breakables Models", false, "noBreakables", function(v) Features.renderFilter(v) end)
@@ -2731,7 +2753,7 @@ else
 end
 
 -- ---------- PSX ----------
-local psx = addTab("PSX", "◈")
+local psx = addTab("PSX")
 
 addSection(psx, "PSX Classic")
 addMultiSelect(psx, "Select Goals to Complete in PSX...",
@@ -2752,7 +2774,7 @@ else
 end
 
 -- ---------- QUEST ----------
-local quest = addTab("Quest", "✦")
+local quest = addTab("Quest")
 
 addSection(quest, "Rank Quest")
 addSlider(quest, "Select Max Rank", 1, 40, 40, 1, "questMaxRank", nil, " Ranks")
@@ -2769,7 +2791,7 @@ addButton(quest, "Complete Rank Quests Now", THEME.Accent, function() Features.q
 addNote(quest, "Claims every visible Claim / Collect / Complete button, selected ranks first, up to Max Rank per pass. Open the Quest menu first.", THEME.Sub)
 
 -- ---------- MISC ----------
-local misc = addTab("Misc", "◍")
+local misc = addTab("Misc")
 addSection(misc, "Server")
 addButton(misc, "Rejoin", THEME.Text, function() Features.rejoin() end)
 addButton(misc, "Server Hop", THEME.Text, function() Features.hop() end)
@@ -2779,7 +2801,7 @@ addButton(misc, "Copy JobId", THEME.Text, function() Features.copyJob() end)
 addButton(misc, "Copy PlaceId", THEME.Text, function() Features.copyPlace() end)
 
 -- ---------- SETTINGS ----------
-local set = addTab("Settings", "⚙")
+local set = addTab("Settings")
 addSection(set, "Interface")
 addSlider(set, "UI Transparency", 0, 60, 0, 5, "uiAlpha", function(v)
     gui.Enabled = true
