@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.4.1"
+local VERSION = "1.4.2"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -618,7 +618,7 @@ local function addSlider(page, label, lo, hi, default, step, flag, cb, suffix)
         end
     end))
 
-    bind(flag, function(v) apply(v, true) end)
+    bind(flag, function(v) apply(v, false) end)
     apply(default, true)
     return apply
 end
@@ -732,7 +732,12 @@ local function addTextbox(page, label, placeholder, flag, cb)
         if cb then task.spawn(cb, box.Text) end
     end)
     bind(flag, function(v)
-        box.Text = tostring(v)
+        -- programmatic sets (config load, quest arming) have to move the flag
+        -- and the behaviour, not just the text in the box
+        v = (v == nil) and "" or tostring(v)
+        box.Text = v
+        Flags[flag] = v
+        if cb then task.spawn(cb, v) end
     end)
     return box
 end
@@ -779,6 +784,7 @@ local function addKeybind(page, label, default, flag, cb)
 
     bind(flag, function(v)
         btn.Text = tostring(v)
+        Flags[flag] = v
         local key = Enum.KeyCode[v]
         if key and cb then task.spawn(cb, key) end
     end)
@@ -894,6 +900,8 @@ local function addDropdown(page, label, optionsFn, default, flag, cb)
     bind(flag, function(v)
         value = v
         valueLbl.Text = tostring(v) .. "  v"
+        Flags[flag] = v
+        if cb then task.spawn(cb, v) end
     end)
     Flags[flag] = value
     return valueLbl
@@ -1039,7 +1047,7 @@ local function addMultiSelect(page, label, options, default, flag, cb)
         if type(v) ~= "table" then return end
         picked = {}
         for _, item in ipairs(v) do picked[item] = true end
-        summary()
+        commit()
     end)
 
     commit()
@@ -1729,115 +1737,6 @@ track(RunService.Heartbeat:Connect(function(dt)
 end))
 
 Stops.Psx = function() Flags.psxAutoGoals = false end
-
--- ============================================================
--- QUEST
--- ============================================================
--- Same rule as PSX: no guessed remotes. Find the claim / gift button the game
--- is showing and fire its click.
-local Quest = {
-    claimWords = { "claim", "collect", "complete", "redeem", "turn in" },
-    questWords = {
-        Daily = "daily", Rank = "rank", Clan = "clan",
-        Season = "season", Event = "event", Index = "index",
-    },
-}
-
-local function uiButtons(words, limit)
-    local out, seen = {}, 0
-    for _, inst in ipairs(PG:GetDescendants()) do
-        seen = seen + 1
-        if seen > GUI_SCAN_CAP then break end
-        if inst:IsA("GuiButton") and isShown(inst) then
-            local hay = string.lower(inst.Name) .. " " .. string.lower(inst.Text or "")
-            for _, w in ipairs(words) do
-                if string.find(hay, w, 1, true) then
-                    out[#out + 1] = inst
-                    break
-                end
-            end
-            if #out >= limit then break end
-        end
-    end
-    return out
-end
-
-local function matchesAny(btn, words)
-    if #words == 0 then return true end
-    local hay = string.lower(btn.Name) .. " " .. string.lower(btn.Text or "")
-    for _, w in ipairs(words) do
-        if string.find(hay, w, 1, true) then return true end
-    end
-    return false
-end
-
-function Quest.pass()
-    local maxRank = Flags.questMaxRank or 40
-    local questFilter = {}
-    local selected = Flags.questQuests
-    if type(selected) == "table" then
-        for _, name in ipairs(selected) do
-            local w = Quest.questWords[name]
-            if w then questFilter[#questFilter + 1] = w end
-        end
-    end
-
-    local fired = 0
-    local matched, rest = {}, {}
-    for _, btn in ipairs(uiButtons(Quest.claimWords, 60)) do
-        if matchesAny(btn, questFilter) then
-            matched[#matched + 1] = btn
-        else
-            rest[#rest + 1] = btn
-        end
-    end
-
-    -- selected ranks go first, the rest still get claimed: a filter that silently
-    -- does nothing is a dead widget
-    for _, list in ipairs({ matched, rest }) do
-        for _, btn in ipairs(list) do
-            if fired >= maxRank then break end
-            if PSX.click(btn) then fired = fired + 1 end
-        end
-    end
-
-    local gifts = 0
-    local giftSel = Flags.questGifts
-    if type(giftSel) == "table" and #giftSel > 0 then
-        local giftWords = {}
-        for _, name in ipairs(giftSel) do
-            giftWords[#giftWords + 1] = string.lower(name)
-        end
-        for _, btn in ipairs(uiButtons({ "gift" }, 12)) do
-            if gifts >= 3 then break end
-            if matchesAny(btn, giftWords) and PSX.click(btn) then
-                gifts = gifts + 1
-            end
-        end
-    end
-
-    return fired, gifts
-end
-
-Features.questPass = function()
-    local fired, gifts = Quest.pass()
-    if fired == 0 and gifts == 0 then
-        notify("No quest button on screen - open the Quest menu first", "error")
-    else
-        notify("Quests: " .. fired .. " claimed, " .. gifts .. " gifts opened", "success")
-    end
-end
-
-local questAcc = 0
-track(RunService.Heartbeat:Connect(function(dt)
-    if not Flags.questAuto then return end
-    questAcc = questAcc + dt
-    if questAcc < (Flags.questWait or 5) then return end
-    questAcc = 0
-    pcall(Quest.pass)
-end))
-
-Stops.Quest = function() Flags.questAuto = false end
 
 -- waypoints
 local CFG_DIR = "Tupachup"
@@ -2773,6 +2672,351 @@ else
     addNote(psx, "firesignal is missing on this executor - PSX buttons are off. Join still works if a PlaceId is set.", THEME.Red)
 end
 
+-- ============================================================
+-- QUEST RUNNER
+-- ============================================================
+-- The quest panel is the game printing its own requirements: "Break 50
+-- Breakables", "Hatch 20 Eggs", "Collect 5,000 Coins". Nothing here guesses a
+-- remote. The requirement line decides which farm tool gets armed, and claim
+-- buttons are fired through their own MouseButton1Click.
+local Quest = {
+    claimWords = { "claim", "collect", "complete", "redeem", "turn in" },
+    questWords = {
+        Daily = "daily", Rank = "rank", Clan = "clan",
+        Season = "season", Event = "event", Index = "index",
+    },
+    -- requirement keyword -> what the farm toolkit has to do about it
+    plan = {
+        breakable = {
+            words = { "breakable", "break", "destroy", "smash", "chest", "dig", "mine" },
+            set = {
+                autoPrompt = true,
+                promptFilter = "breakable, break, chest, destroy, dig, mine",
+                promptRadius = 120,
+            },
+        },
+        egg = {
+            words = { "hatch", "egg" },
+            set = {
+                autoPrompt = true,
+                promptFilter = "egg, hatch",
+                promptRadius = 120,
+            },
+        },
+        coin = {
+            words = { "coin", "gem", "cash", "money", "diamond", "collect", "pick" },
+            set = {
+                autoTouch = true,
+                touchFilter = "coin, gem, cash, money, diamond, collect",
+                promptRadius = 120,
+            },
+        },
+        plant = {
+            words = { "plant", "harvest", "water", "grow", "seed" },
+            set = {
+                autoPrompt = true,
+                promptFilter = "plant, harvest, water, collect",
+                promptRadius = 120,
+                autoTouch = true,
+                touchFilter = "crop, fruit, seed, plant",
+            },
+        },
+        sell = {
+            words = { "sell", "trade", "buy", "purchase" },
+            set = {
+                autoPrompt = true,
+                promptFilter = "sell, trade, buy, purchase",
+                promptRadius = 120,
+            },
+        },
+        click = {
+            words = { "click", "tap", "spin", "wheel", "press" },
+            set = { autoClick = true, clickCps = 15 },
+        },
+        boss = {
+            words = { "defeat", "kill", "damage", "boss", "attack" },
+            set = { autoClick = true, clickCps = 20 },
+        },
+        escape = {
+            words = { "escape", "survive", "reach", "door", "exit" },
+            set = {
+                autoPrompt = true,
+                promptFilter = "escape, door, exit, enter, reach",
+                promptRadius = 120,
+            },
+        },
+    },
+    -- order decides priority when one line matches two rules
+    order = { "breakable", "egg", "coin", "plant", "sell", "click", "boss", "escape" },
+    armed = {},  -- flag -> { prev = value } recorded before we touched it
+    reqs = {},   -- requirement list from the last read
+    cycles = 0,
+}
+
+local questStatusLabel
+
+local function uiButtons(words, limit)
+    local out, seen = {}, 0
+    for _, inst in ipairs(PG:GetDescendants()) do
+        seen = seen + 1
+        if seen > GUI_SCAN_CAP then break end
+        if inst:IsA("GuiButton") and isShown(inst) then
+            local hay = string.lower(inst.Name) .. " " .. string.lower(inst.Text or "")
+            for _, w in ipairs(words) do
+                if string.find(hay, w, 1, true) then
+                    out[#out + 1] = inst
+                    break
+                end
+            end
+            if #out >= limit then break end
+        end
+    end
+    return out
+end
+
+local function matchesAny(btn, words)
+    if #words == 0 then return true end
+    local hay = string.lower(btn.Name) .. " " .. string.lower(btn.Text or "")
+    for _, w in ipairs(words) do
+        if string.find(hay, w, 1, true) then return true end
+    end
+    return false
+end
+
+function Quest.classify(low)
+    for _, key in ipairs(Quest.order) do
+        for _, w in ipairs(Quest.plan[key].words) do
+            if string.find(low, w, 1, true) then return key end
+        end
+    end
+    return nil
+end
+
+-- the panel is not named the same in every game, so the ancestor name is a
+-- hint, not a requirement: a progress line ("0/50") is enough on its own
+local QUEST_NODE_WORDS = { "quest", "goal", "mission", "task", "objective", "challenge" }
+
+local function underQuestNode(inst)
+    local node, depth = inst.Parent, 0
+    while node and node ~= PG and depth < 9 do
+        local low = string.lower(node.Name)
+        for _, w in ipairs(QUEST_NODE_WORDS) do
+            if string.find(low, w, 1, true) then return true end
+        end
+        node = node.Parent
+        depth = depth + 1
+    end
+    return false
+end
+
+local function cleanText(text)
+    local t = string.gsub(text, "%s+", " ")
+    t = string.gsub(t, "^%s+", "")
+    t = string.gsub(t, "%s+$", "")
+    return t
+end
+
+function Quest.read()
+    local primary, fallback, seen = {}, {}, {}
+    local scanned = 0
+    for _, inst in ipairs(PG:GetDescendants()) do
+        scanned = scanned + 1
+        if scanned > GUI_SCAN_CAP then break end
+        if inst:IsA("TextLabel") and type(inst.Text) == "string"
+            and inst.Text ~= "" and isShown(inst) then
+            local text = cleanText(inst.Text)
+            local low = string.lower(text)
+            if #text >= 4 and #text <= 90 and not seen[low]
+                and string.find(low, "%d") then
+                local key = Quest.classify(low)
+                if key then
+                    seen[low] = true
+                    local entry = { text = text, key = key }
+                    if underQuestNode(inst) then
+                        primary[#primary + 1] = entry
+                    elseif string.find(low, "%d+%s*/%s*%d+") then
+                        fallback[#fallback + 1] = entry
+                    end
+                end
+            end
+            if #primary >= 40 then break end
+        end
+    end
+    Quest.reqs = (#primary > 0) and primary or fallback
+    return Quest.reqs
+end
+
+function Quest.arm(keys)
+    local applied = {}
+    for _, key in ipairs(Quest.order) do
+        if keys[key] then
+            for flag, value in pairs(Quest.plan[key].set) do
+                if Quest.armed[flag] == nil then
+                    Quest.armed[flag] = { prev = Flags[flag] }
+                end
+                if Flags[flag] ~= value then
+                    callSetter(flag, value)
+                    applied[#applied + 1] = flag
+                end
+            end
+        end
+    end
+    table.sort(applied)
+    return applied
+end
+
+function Quest.disarm()
+    local restored = 0
+    for flag, rec in pairs(Quest.armed) do
+        if Flags[flag] ~= rec.prev then
+            callSetter(flag, rec.prev)
+            restored = restored + 1
+        end
+    end
+    Quest.armed = {}
+    return restored
+end
+
+function Quest.claim()
+    local maxRank = Flags.questMaxRank or 40
+    local questFilter = {}
+    local selected = Flags.questQuests
+    if type(selected) == "table" then
+        for _, name in ipairs(selected) do
+            local w = Quest.questWords[name]
+            if w then questFilter[#questFilter + 1] = w end
+        end
+    end
+
+    local matched, rest = {}, {}
+    for _, btn in ipairs(uiButtons(Quest.claimWords, 60)) do
+        if matchesAny(btn, questFilter) then
+            matched[#matched + 1] = btn
+        else
+            rest[#rest + 1] = btn
+        end
+    end
+
+    -- selected ranks go first, the rest still get claimed: a filter that
+    -- silently does nothing is a dead widget
+    local fired = 0
+    for _, list in ipairs({ matched, rest }) do
+        for _, btn in ipairs(list) do
+            if fired >= maxRank then break end
+            if PSX.click(btn) then fired = fired + 1 end
+        end
+    end
+
+    local gifts = 0
+    local giftSel = Flags.questGifts
+    if type(giftSel) == "table" and #giftSel > 0 then
+        local giftWords = {}
+        for _, name in ipairs(giftSel) do
+            giftWords[#giftWords + 1] = string.lower(name)
+        end
+        for _, btn in ipairs(uiButtons({ "gift" }, 12)) do
+            if gifts >= 3 then break end
+            if matchesAny(btn, giftWords) and PSX.click(btn) then
+                gifts = gifts + 1
+            end
+        end
+    end
+
+    return fired, gifts
+end
+
+local function listKeys(reqs)
+    local seen, out = {}, {}
+    for _, r in ipairs(reqs) do
+        if not seen[r.key] then
+            seen[r.key] = true
+            out[#out + 1] = r.key
+        end
+    end
+    return table.concat(out, ", ")
+end
+
+function Quest.setStatus(text, color)
+    Quest.status = text
+    if questStatusLabel and questStatusLabel.Parent then
+        questStatusLabel.Text = text
+        if color then questStatusLabel.TextColor3 = color end
+    end
+end
+
+function Quest.cycle()
+    local reqs = Quest.read()
+    local keys = {}
+    for _, r in ipairs(reqs) do keys[r.key] = true end
+
+    local applied = Quest.arm(keys)
+    local fired, gifts = Quest.claim()
+    Quest.cycles = Quest.cycles + 1
+
+    if #reqs == 0 then
+        Quest.setStatus("No quest text on screen. Open the Rank Quest panel, then toggle again.", THEME.Red)
+    else
+        local tools = (#applied > 0) and table.concat(applied, ", ") or "already armed"
+        Quest.setStatus(
+            ("%d quests (%s) - tools: %s - claimed %d, gifts %d")
+                :format(#reqs, listKeys(reqs), tools, fired, gifts),
+            THEME.Sub
+        )
+    end
+
+    return fired, gifts, #reqs, applied
+end
+
+Features.questPass = function()
+    local fired, gifts, count = Quest.cycle()
+    if count == 0 then
+        notify("No quest panel on screen - open the Rank Quest tab in game first", "error")
+    else
+        notify(("Quests: %d read, %d claimed, %d gifts - %s")
+            :format(count, fired, gifts, listKeys(Quest.reqs)), "success")
+    end
+    return fired
+end
+
+Features.questRead = function()
+    local reqs = Quest.read()
+    if #reqs == 0 then
+        notify("No quest text found - open the Rank Quest panel first", "error")
+        return 0
+    end
+    notify(("%d quest lines: %s"):format(#reqs, listKeys(reqs)), "success")
+    Quest.setStatus(("%d quests (%s) - %s")
+        :format(#reqs, listKeys(reqs), reqs[1] and reqs[1].text or ""), THEME.Accent)
+    return #reqs
+end
+
+Features.questAuto = function(on)
+    if not on then
+        local restored = Quest.disarm()
+        Quest.setStatus(("Idle. %d tool flag(s) restored."):format(restored), THEME.Sub)
+        return
+    end
+    -- first cycle runs straight away so the toggle does something visible
+    task.spawn(function()
+        task.wait(0.4)
+        if Flags.questAuto then pcall(Quest.cycle) end
+    end)
+end
+
+local questAcc = 0
+track(RunService.Heartbeat:Connect(function(dt)
+    if not Flags.questAuto then return end
+    questAcc = questAcc + (dt or 0)
+    if questAcc < (Flags.questWait or 5) then return end
+    questAcc = 0
+    pcall(Quest.cycle)
+end))
+
+Stops.Quest = function()
+    Flags.questAuto = false
+    pcall(Quest.disarm)
+end
+
 -- ---------- QUEST ----------
 local quest = addTab("Quest")
 
@@ -2785,10 +3029,15 @@ addSlider(quest, "Select Priority Quests Wait Time", 1, 30, 5, 1, "questWait", n
 addMultiSelect(quest, "Select Gifts To Open If Necessary",
     { "Small Gift", "Medium Gift", "Large Gift", "Huge Gift", "Titanic Gift" },
     { "Small Gift", "Medium Gift", "Large Gift", "Huge Gift", "Titanic Gift" }, "questGifts")
-addToggle(quest, "Auto Complete Selected Rank Quests", false, "questAuto")
+addToggle(quest, "Auto Complete Selected Rank Quests", false, "questAuto", function(on)
+    Features.questAuto(on)
+end)
 
+addButton(quest, "Read Rank Quests", THEME.Text, function() Features.questRead() end)
 addButton(quest, "Complete Rank Quests Now", THEME.Accent, function() Features.questPass() end)
-addNote(quest, "Claims every visible Claim / Collect / Complete button, selected ranks first, up to Max Rank per pass. Open the Quest menu first.", THEME.Sub)
+
+questStatusLabel = addNote(quest, "Idle. Open the Rank Quest panel, then switch Auto Complete on.", THEME.Sub)
+addNote(quest, "Reads the requirement lines on screen, arms the matching farm tool, then fires the Claim buttons. Tools restore when switched off.", THEME.Sub)
 
 -- ---------- MISC ----------
 local misc = addTab("Misc")
@@ -3067,6 +3316,7 @@ getgenv().Tupachup = {
     Flags = Flags,
     Features = Features,
     Toolkit = Toolkit,
+    Quest = Quest,
     Game = activeGame,
     Detected = DETECTED_NAME,
     Capabilities = CAP,
