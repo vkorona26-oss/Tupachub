@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.2.0"
+local VERSION = "1.2.1"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -1339,6 +1339,121 @@ Features.webhookTest = function(url)
     end
 end
 
+-- ============================================================
+-- RENDER FILTERS  (client-side hide, fully restorable)
+-- ============================================================
+local Render = {
+    hidden = {},
+    rules = {
+        { flag = "noBreakables", words = { "breakable" } },
+        { flag = "noPets",       words = { "pet" } },
+        { flag = "noConfetti",   words = { "confetti" } },
+        { flag = "noLootbox",    words = { "lootbox", "loot box" } },
+        { flag = "noEggFx",      words = { "exclusive egg", "egg animation" } },
+    },
+}
+
+-- one scan pass is capped: a corrupt or gigantic workspace is skipped, never hung
+local SCAN_CAP = 12000
+
+local function hideNode(inst, depth)
+    if depth > 4 or Render.hidden[inst] ~= nil then return end
+    if inst:IsA("Model") or inst:IsA("Folder") then
+        if inst:FindFirstChildOfClass("Humanoid") then return end
+        Render.hidden[inst] = false
+        for _, d in ipairs(inst:GetDescendants()) do
+            if d:IsA("BasePart") then
+                Render.hidden[d] = d.LocalTransparencyModifier or 0
+                d.LocalTransparencyModifier = 1
+            elseif d:IsA("ParticleEmitter") or d:IsA("Beam") or d:IsA("Trail")
+                or d:IsA("Fire") or d:IsA("Smoke") or d:IsA("Sparkles") then
+                Render.hidden[d] = d.Enabled
+                d.Enabled = false
+            end
+        end
+    elseif inst:IsA("BasePart") then
+        Render.hidden[inst] = inst.LocalTransparencyModifier or 0
+        inst.LocalTransparencyModifier = 1
+    elseif inst:IsA("ParticleEmitter") or inst:IsA("Beam") or inst:IsA("Trail")
+        or inst:IsA("Fire") or inst:IsA("Smoke") or inst:IsA("Sparkles") then
+        Render.hidden[inst] = inst.Enabled
+        inst.Enabled = false
+    end
+end
+
+local function restoreRender()
+    for inst, prev in pairs(Render.hidden) do
+        if inst.Parent then
+            if inst:IsA("BasePart") then
+                inst.LocalTransparencyModifier = prev or 0
+            elseif prev ~= false then
+                pcall(function() inst.Enabled = prev end)
+            end
+        end
+    end
+    Render.hidden = {}
+end
+
+local function activeRules()
+    local out = {}
+    for _, r in ipairs(Render.rules) do
+        if Flags[r.flag] then out[#out + 1] = r end
+    end
+    return out
+end
+
+function Render.scan()
+    local active = activeRules()
+    if #active == 0 then return end
+
+    local myChar = LP.Character
+    local stack = { workspace }
+    local seen = 0
+
+    while #stack > 0 and seen < SCAN_CAP do
+        local node = table.remove(stack)
+        for _, child in ipairs(node:GetChildren()) do
+            seen = seen + 1
+            if seen > SCAN_CAP then break end
+            if child ~= myChar and child ~= workspace.CurrentCamera
+                and not child:IsA("Terrain") and not child:IsA("Camera") then
+                local lower = string.lower(child.Name)
+                local hit = false
+                for _, r in ipairs(active) do
+                    for _, w in ipairs(r.words) do
+                        if string.find(lower, w, 1, true) then hit = true break end
+                    end
+                    if hit then break end
+                end
+                if hit then
+                    hideNode(child, 0)
+                elseif child:IsA("Folder") or child:IsA("Model") then
+                    stack[#stack + 1] = child
+                end
+            end
+        end
+    end
+end
+
+Features.renderFilter = function(on)
+    if not on then restoreRender() end
+    pcall(Render.scan)
+end
+
+Stops.Render = restoreRender
+
+-- pets, confetti and egg effects respawn: rescan on a slow tick while any rule is on
+do
+    local acc = 0
+    track(RunService.Heartbeat:Connect(function(dt)
+        if #activeRules() == 0 then return end
+        acc = acc + dt
+        if acc < 1.5 then return end
+        acc = 0
+        pcall(Render.scan)
+    end))
+end
+
 -- waypoints
 local CFG_DIR = "Tupachup"
 local WP_FILE = CFG_DIR .. "/waypoints.json"
@@ -2216,6 +2331,15 @@ end
 
 -- ---------- OPTIMIZATION ----------
 local opt = addTab("Optimization", "◐")
+
+addSection(opt, "Game Objects")
+addToggle(opt, "Disable Breakables Models", false, "noBreakables", function(v) Features.renderFilter(v) end)
+addToggle(opt, "Disable Pets Rendering", false, "noPets", function(v) Features.renderFilter(v) end)
+addToggle(opt, "Disable Confetti Rendering", false, "noConfetti", function(v) Features.renderFilter(v) end)
+addToggle(opt, "Disable Lootbox Animation", false, "noLootbox", function(v) Features.renderFilter(v) end)
+addToggle(opt, "Disable Exclusive Egg Animation", false, "noEggFx", function(v) Features.renderFilter(v) end)
+addNote(opt, "Hides the object on your client only - the server still counts it. Rescans every 1.5s, restored on toggle off and on unload.", THEME.Sub)
+
 addSection(opt, "Graphics")
 addToggle(opt, "Low Graphics Mode", false, "lowGfx", function(v) Features.lowGraphics(v) end)
 addNote(opt, "Turns off post effects, atmosphere density and water waves. Restored on toggle off and on unload.", THEME.Sub)
