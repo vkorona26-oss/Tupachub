@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tupachub — Roblox script hub</title>
+<meta name="description" content="Tupachub is a lightweight Roblox script hub for the biggest simulators. Farm, hatch and collect while you are AFK.">
+<meta name="theme-color" content="#0a0a0b">
+<meta property="og:title" content="Tupachub — Automate the grind. Keep the loot.">
+<meta property="og:description" content="Pet Simulator 99, Pets GO, Grow a Garden, Escape Tsunami for Brainrots. One line, every executor, mobile and PC.">
+<meta property="og:type" content="website">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+<div class="glow" aria-hidden="true"></div>
+
+<header class="nav">
+  <a class="brand" href="#top">
+    <span class="mark">T</span>
+    <span class="name">Tupa<span class="accent">chub</span></span>
+  </a>
+  <nav class="links">
+    <a href="#games">Games</a>
+    <a href="#features">Features</a>
+    <a href="#updates">Updates</a>
+    <a href="#docs">Docs</a>
+  </nav>
+  <button class="btn btn-ghost" data-copy-script>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l-5-6 5-6M15 6l5 6-5 6"/></svg>
+    Copy Script
+  </button>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="badge"><span class="dot"></span> ONLINE AND UPDATED</div>
+    <h1>Automate the grind.<br><span class="accent">Keep the loot.</span></h1>
+    <p class="lede">
+      Tupachub is a lightweight script hub for Roblox's biggest simulators.
+      Farm, hatch and collect while you are AFK, with one clean menu that
+      adapts to the game you are in.
+    </p>
+
+    <div class="cta">
+      <button class="btn btn-primary" data-copy-script>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l-5-6 5-6M15 6l5 6-5 6"/></svg>
+        <span>Copy Script</span>
+      </button>
+      <a class="btn btn-discord" href="https://discord.gg/ojailbreaks" target="_blank" rel="noreferrer">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 9.5c.5-1 1.5-1.5 3.5-1.5s3 .5 3.5 1.5M8 15c1 .8 2.3 1.2 4 1.2s3-.4 4-1.2"/><circle cx="9" cy="12.5" r="1"/><circle cx="15" cy="12.5" r="1"/></svg>
+        Join Discord
+      </a>
+    </div>
+
+    <div class="terminal">
+      <div class="term-bar">
+        <span class="lights"><i></i><i></i><i></i></span>
+        <span class="file">tupachub.lua</span>
+        <button class="term-copy" data-copy-script>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>
+          <span>Copy</span>
+        </button>
+      </div>
+      <pre><code id="script-line">loadstring(game:HttpGet("https://vkorona26-oss.github.io/Tupachub/Exec"))()</code></pre>
+    </div>
+
+    <p class="fine">Paste it into your executor and run it in any supported game. Works on PC and mobile, executor level 3 and up.</p>
+  </section>
+
+  <section id="games" class="section">
+    <p class="eyebrow">Supported games</p>
+    <h2>Built for the four that matter.</h2>
+    <div class="grid games">
+      <article class="card">
+        <div class="card-top"><span class="chip">PS99</span><span class="status">auto</span></div>
+        <h3>Pet Simulator 99!</h3>
+        <p>Auto-hatch fires the egg prompts in range. Auto-collect touches coin and gem parts. Clicker and rebirth prompts on tap.</p>
+      </article>
+      <article class="card">
+        <div class="card-top"><span class="chip">PGO</span><span class="status">auto</span></div>
+        <h3>Pets GO!</h3>
+        <p>Same layout as PS99: eggs hatch on prompt, coins collect on touch, radius tuned for spawn areas.</p>
+      </article>
+      <article class="card">
+        <div class="card-top"><span class="chip">GaG</span><span class="status">auto</span></div>
+        <h3>Grow a Garden</h3>
+        <p>Plant, harvest and sell through plot prompts. Auto-collect picks crops and fruit without walking the rows.</p>
+      </article>
+      <article class="card">
+        <div class="card-top"><span class="chip">ETFB</span><span class="status">auto</span></div>
+        <h3>Escape Tsunami for Brainrots</h3>
+        <p>Collect brainrot parts on touch, fire escape interactions, and move faster when the wave is close.</p>
+      </article>
+    </div>
+    <p class="note">Game detection reads <code>game.Name</code> and the marketplace product name — no hardcoded PlaceIds, so a rename never breaks it.</p>
+  </section>
+
+  <section id="features" class="section">
+    <p class="eyebrow">Features</p>
+    <h2>One menu, six things done right.</h2>
+    <div class="grid feats">
+      <article class="feat"><h3>Game presets</h3><p>The Game tab detects the place and arms the right prompt and collect filters in one tap.</p></article>
+      <article class="feat"><h3>Farm toolkit</h3><p>Auto prompts, auto touch collect, auto click, auto keypress — with radius and name filters.</p></article>
+      <article class="feat"><h3>Scanners</h3><p>List every ProximityPrompt, collectible part and RemoteEvent, then fire or copy straight from the list.</p></article>
+      <article class="feat"><h3>Mobile first</h3><p>The window scales to your screen, drags by touch, and a floating T button opens it.</p></article>
+      <article class="feat"><h3>Executor 3-8</h3><p>Every optional API is probed at boot. Missing ones switch off their widget instead of erroring.</p></article>
+      <article class="feat"><h3>Configs and unload</h3><p>Save your flags to disk, load them next session. Unload restores lighting, FOV, speed and every connection.</p></article>
+    </div>
+  </section>
+
+  <section id="updates" class="section">
+    <p class="eyebrow">Updates</p>
+    <h2>Shipping notes.</h2>
+    <ol class="timeline">
+      <li>
+        <div class="meta"><span class="ver">v1.1.0</span><time>2026-11-20</time></div>
+        <h3>Game presets and the farm toolkit</h3>
+        <p>Game tab with PS99 / PGO / GaG / ETFB detection, prompt and touch automation, scanners, remote firer, mobile scaling and a capability probe for low-level executors.</p>
+      </li>
+      <li>
+        <div class="meta"><span class="ver">v1.0.0</span><time>2026-11-20</time></div>
+        <h3>First release</h3>
+        <p>Loader, five tabs, ESP, flight, teleport, waypoints, server tools, config save and a clean unload.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section id="docs" class="section">
+    <p class="eyebrow">Docs</p>
+    <h2>Three things worth knowing.</h2>
+    <div class="grid docs">
+      <article class="card">
+        <h3>Opening the menu</h3>
+        <p><kbd>RightShift</kbd> toggles the window on PC. On mobile, tap the floating <b>T</b> button. Rebind it in Settings.</p>
+      </article>
+      <article class="card">
+        <h3>Unloading</h3>
+        <p>Press the close button, or run <code>getgenv().Tupachub.Unload()</code>. Walk speed, FOV, lighting and ESP are restored.</p>
+      </article>
+      <article class="card">
+        <h3>When a game fights back</h3>
+        <p>Open Farm → Scan Remotes, find the action, then fire it from the remote panel with your own arguments.</p>
+      </article>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div class="foot-left">
+    <span class="mark small">T</span>
+    <span>Tupachub &middot; <span id="year"></span></span>
+  </div>
+  <div class="foot-links">
+    <a href="https://github.com/vkorona26-oss/Tupachub" target="_blank" rel="noreferrer">GitHub</a>
+    <a href="https://discord.gg/ojailbreaks" target="_blank" rel="noreferrer">Discord</a>
+    <a href="#top">Top</a>
+  </div>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite">copied</div>
+
+<script src="assets/app.js"></script>
+</body>
+</html>
