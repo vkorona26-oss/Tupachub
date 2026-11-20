@@ -1,14 +1,15 @@
 --[[
-    OJB HUB  |  v1.0.0
-    Single-file Roblox script hub. No external UI library, no dependencies.
+    TUPACHUP  |  single-file Roblox script hub
+    No external UI library, no dependencies.
     Entry point: loadstring(game:HttpGet("<your-host>/Exec"))()
-    Unload: getgenv().OJBHub.Unload()
+    Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.1.0"
+local VERSION = "1.2.0"
+local BRAND = "Tupachup"
 
-if getgenv().OJBHub and getgenv().OJBHub.Unload then
-    pcall(getgenv().OJBHub.Unload)
+if getgenv().Tupachup and getgenv().Tupachup.Unload then
+    pcall(getgenv().Tupachup.Unload)
 end
 
 local Players          = game:GetService("Players")
@@ -38,6 +39,10 @@ local CAP = {
     prompt    = type(fireproximityprompt) == "function",
     keypress  = type(keypress) == "function",
     http      = type(game.HttpGet) == "function" or type(game.HttpGetAsync) == "function",
+    request   = type(request) == "function"
+        or type(http_request) == "function"
+        or (type(syn) == "table" and type(syn.request) == "function"),
+    fpsCap    = type(setfpscap) == "function",
     mouse     = type(mouse1click) == "function",
 }
 
@@ -83,19 +88,19 @@ local activeGame = DETECTED_KEY
 -- THEME
 -- ============================================================
 local THEME = {
-    Accent = Color3.fromRGB(122, 92, 255),
-    Bg     = Color3.fromRGB(16, 16, 20),
-    Panel  = Color3.fromRGB(23, 23, 28),
-    Row    = Color3.fromRGB(30, 30, 37),
-    Text   = Color3.fromRGB(234, 234, 242),
-    Sub    = Color3.fromRGB(142, 142, 156),
-    Stroke = Color3.fromRGB(50, 50, 62),
+    Accent = Color3.fromRGB(245, 165, 36),
+    Bg     = Color3.fromRGB(17, 17, 20),
+    Panel  = Color3.fromRGB(25, 25, 29),
+    Row    = Color3.fromRGB(34, 34, 40),
+    Text   = Color3.fromRGB(238, 238, 244),
+    Sub    = Color3.fromRGB(139, 139, 150),
+    Stroke = Color3.fromRGB(45, 45, 53),
     Red    = Color3.fromRGB(255, 92, 92),
     Green  = Color3.fromRGB(86, 226, 140),
 }
 
-local WIN_W, WIN_H = 560, 436
-local TOP_H, RAIL_W, PAD = 38, 140, 14
+local WIN_W, WIN_H = 620, 410
+local TOP_H, RAIL_W, PAD = 42, 152, 12
 local ROW_W = WIN_W - RAIL_W - PAD * 2
 
 -- ============================================================
@@ -191,7 +196,7 @@ local function notify(text, kind)
     if not notifyOn then return end
     if not notifHolder or not notifHolder.Parent then
         notifHolder = new("ScreenGui", {
-            Name = "OJBHubNotify",
+            Name = "TupachupNotify",
             ResetOnSpawn = false,
             IgnoreGuiInset = true,
             DisplayOrder = 999,
@@ -253,7 +258,7 @@ end
 -- GUI ROOT
 -- ============================================================
 local gui = new("ScreenGui", {
-    Name = "OJBHub",
+    Name = "Tupachup",
     ResetOnSpawn = false,
     IgnoreGuiInset = true,
     DisplayOrder = 500,
@@ -268,7 +273,7 @@ local window = new("Frame", {
     BorderSizePixel = 0,
     ClipsDescendants = false,
 }, gui)
-new("UICorner", { CornerRadius = UDim.new(0, 10) }, window)
+new("UICorner", { CornerRadius = UDim.new(0, 12) }, window)
 local winStroke = new("UIStroke", { Color = THEME.Stroke, Thickness = 1 }, window)
 
 -- phones: shrink the whole window, never overflow the viewport
@@ -298,7 +303,7 @@ local topbar = new("Frame", {
 
 local logo = new("Frame", {
     Size = UDim2.fromOffset(20, 20),
-    Position = UDim2.fromOffset(14, 9),
+    Position = UDim2.fromOffset(14, 11),
     BackgroundColor3 = THEME.Accent,
     BorderSizePixel = 0,
 }, topbar)
@@ -306,32 +311,24 @@ new("UICorner", { CornerRadius = UDim.new(0, 5) }, logo)
 new("TextLabel", {
     Size = UDim2.fromScale(1, 1),
     BackgroundTransparency = 1,
-    Text = "O",
+    Text = "T",
     Font = Enum.Font.GothamBlack,
     TextSize = 13,
-    TextColor3 = Color3.new(1, 1, 1),
+    TextColor3 = Color3.fromRGB(22, 16, 10),
 }, logo)
 
 new("TextLabel", {
-    Size = UDim2.fromOffset(180, 20),
-    Position = UDim2.fromOffset(42, 9),
+    Size = UDim2.new(1, -220, 1, 0),
+    Position = UDim2.fromOffset(42, 0),
     BackgroundTransparency = 1,
-    Text = "OJB HUB",
+    Text = "<b>" .. BRAND .. " Premium</b>  <font color=\"#8b8b96\">|  "
+        .. (GAME_LABEL[activeGame] or "Universal") .. "</font>",
+    RichText = true,
     TextXAlignment = Enum.TextXAlignment.Left,
     Font = Enum.Font.GothamBold,
     TextSize = 13,
     TextColor3 = THEME.Text,
-}, topbar)
-
-new("TextLabel", {
-    Size = UDim2.fromOffset(80, 20),
-    Position = UDim2.fromOffset(112, 10),
-    BackgroundTransparency = 1,
-    Text = "v" .. VERSION,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    Font = Enum.Font.GothamMedium,
-    TextSize = 11,
-    TextColor3 = THEME.Sub,
+    TextTruncate = Enum.TextTruncate.AtEnd,
 }, topbar)
 
 local function topButton(text, x, color, cb)
@@ -357,7 +354,7 @@ local function topButton(text, x, color, cb)
     return b
 end
 
--- rail
+-- sidebar
 local rail = new("Frame", {
     Name = "Rail",
     Size = UDim2.new(0, RAIL_W, 1, -TOP_H),
@@ -365,12 +362,42 @@ local rail = new("Frame", {
     BackgroundColor3 = THEME.Panel,
     BorderSizePixel = 0,
 }, window)
-new("UICorner", { CornerRadius = UDim.new(0, 10) }, rail)
 new("Frame", {
-    Size = UDim2.new(1, 0, 1, -20),
-    Position = UDim2.fromOffset(0, 10),
+    Size = UDim2.new(0, 1, 1, 0),
+    Position = UDim2.new(1, -1, 0, 0),
+    BackgroundColor3 = THEME.Stroke,
+    BorderSizePixel = 0,
+}, rail)
+
+local tabHolder = new("Frame", {
+    Name = "Tabs",
+    Size = UDim2.new(1, 0, 1, -36),
     BackgroundTransparency = 1,
 }, rail)
+
+local welcome = new("Frame", {
+    Name = "Welcome",
+    Size = UDim2.new(1, 0, 0, 36),
+    Position = UDim2.new(0, 0, 1, -36),
+    BackgroundTransparency = 1,
+}, rail)
+new("Frame", {
+    Size = UDim2.new(1, -20, 0, 1),
+    Position = UDim2.fromOffset(10, 0),
+    BackgroundColor3 = THEME.Stroke,
+    BorderSizePixel = 0,
+}, welcome)
+new("TextLabel", {
+    Size = UDim2.new(1, -20, 1, 0),
+    Position = UDim2.fromOffset(12, 0),
+    BackgroundTransparency = 1,
+    Text = "Welcome, " .. string.sub(tostring(LP.DisplayName or LP.Name or "player"), 1, 14),
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Font = Enum.Font.GothamMedium,
+    TextSize = 11,
+    TextColor3 = THEME.Sub,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+}, welcome)
 
 local pageHolder = new("Frame", {
     Name = "Pages",
@@ -610,6 +637,52 @@ local function addButton(page, label, color, cb)
     b.MouseButton1Click:Connect(cb)
     page.y = page.y + 38
     return b
+end
+
+-- ZapHub-style copy row: label left, copy glyph right, whole row clickable
+local function addCopyRow(page, label, value, note)
+    local row = rowBase(page, 32)
+    local lbl = new("TextLabel", {
+        Size = UDim2.new(1, -40, 1, 0),
+        Position = UDim2.fromOffset(12, 0),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        TextColor3 = THEME.Text,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+    local glyph = new("TextLabel", {
+        Size = UDim2.fromOffset(20, 20),
+        Position = UDim2.new(1, -28, 0.5, -10),
+        BackgroundTransparency = 1,
+        Text = "⧉",
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextColor3 = THEME.Sub,
+    }, row)
+    local hit = new("TextButton", {
+        Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+        Text = "",
+    }, row)
+    hit.MouseEnter:Connect(function()
+        TweenService:Create(row, TweenInfo.new(0.12), { BackgroundColor3 = THEME.Stroke }):Play()
+        glyph.TextColor3 = THEME.Accent
+    end)
+    hit.MouseLeave:Connect(function()
+        TweenService:Create(row, TweenInfo.new(0.12), { BackgroundColor3 = THEME.Row }):Play()
+        glyph.TextColor3 = THEME.Sub
+    end)
+    hit.MouseButton1Click:Connect(function()
+        copy(value)
+        lbl.Text = (note or label) .. "  -  copied"
+        task.delay(1.2, function()
+            if lbl.Parent then lbl.Text = label end
+        end)
+    end)
+    return row
 end
 
 local function addTextbox(page, label, placeholder, flag, cb)
@@ -1170,8 +1243,104 @@ Features.fov = function(v)
     if cam then cam.FieldOfView = v end
 end
 
+-- performance
+local gfxBackup = nil
+Features.lowGraphics = function(on)
+    if on then
+        if not gfxBackup then
+            local effects = {}
+            for _, inst in ipairs(Lighting:GetDescendants()) do
+                if inst:IsA("PostEffect") then
+                    effects[#effects + 1] = { inst = inst, enabled = inst.Enabled }
+                end
+            end
+            local atmo = Lighting:FindFirstChildOfClass("Atmosphere")
+            gfxBackup = {
+                effects = effects,
+                shadows = Lighting.GlobalShadows,
+                atmo    = atmo,
+                density = atmo and atmo.Density or nil,
+                water   = workspace.Terrain and workspace.Terrain.WaterWaveSize or nil,
+            }
+        end
+        for _, e in ipairs(gfxBackup.effects) do
+            if e.inst.Parent then e.inst.Enabled = false end
+        end
+        Lighting.GlobalShadows = false
+        if gfxBackup.atmo and gfxBackup.atmo.Parent then gfxBackup.atmo.Density = 0 end
+        if workspace.Terrain then
+            workspace.Terrain.WaterWaveSize = 0
+            workspace.Terrain.WaterWaveSpeed = 0
+        end
+    elseif gfxBackup then
+        for _, e in ipairs(gfxBackup.effects) do
+            if e.inst.Parent then e.inst.Enabled = e.enabled end
+        end
+        Lighting.GlobalShadows = gfxBackup.shadows
+        if gfxBackup.atmo and gfxBackup.atmo.Parent and gfxBackup.density then
+            gfxBackup.atmo.Density = gfxBackup.density
+        end
+        if workspace.Terrain and gfxBackup.water then
+            workspace.Terrain.WaterWaveSize = gfxBackup.water
+        end
+        gfxBackup = nil
+    end
+end
+Stops.Graphics = function() Features.lowGraphics(false) end
+
+Features.fpsCap = function(v)
+    if not CAP.fpsCap then
+        notify("setfpscap is not on this executor", "error")
+        return
+    end
+    pcall(setfpscap, v)
+end
+
+-- webhook
+local function postJson(url, body)
+    local opts = {
+        Url = url,
+        Method = "POST",
+        Headers = { ["Content-Type"] = "application/json" },
+        Body = body,
+    }
+    local ok, res
+    if type(request) == "function" then
+        ok, res = pcall(request, opts)
+    elseif type(http_request) == "function" then
+        ok, res = pcall(http_request, opts)
+    elseif type(syn) == "table" and type(syn.request) == "function" then
+        ok, res = pcall(syn.request, opts)
+    else
+        return false, "no http request function"
+    end
+    if not ok then return false, tostring(res) end
+    return true, res
+end
+
+Features.webhookTest = function(url)
+    if type(url) ~= "string" or url == "" then
+        notify("Paste a webhook URL first", "error")
+        return
+    end
+    if not CAP.request then
+        notify("request() missing on this executor", "error")
+        return
+    end
+    local payload = HttpService:JSONEncode({
+        content = BRAND .. " v" .. VERSION .. " | test message",
+        username = BRAND,
+    })
+    local ok, res = postJson(url, payload)
+    if ok then
+        notify("Webhook delivered", "success")
+    else
+        notify("Webhook failed: " .. tostring(res):sub(1, 60), "error")
+    end
+end
+
 -- waypoints
-local CFG_DIR = "OJBHub"
+local CFG_DIR = "Tupachup"
 local WP_FILE = CFG_DIR .. "/waypoints.json"
 local waypoints = {}
 local waypointPanel
@@ -1519,7 +1688,7 @@ local scanGui
 local function openList(title, rows)
     if scanGui then scanGui:Destroy() end
     scanGui = new("ScreenGui", {
-        Name = "OJBHubScan",
+        Name = "TupachupScan",
         ResetOnSpawn = false,
         IgnoreGuiInset = true,
         DisplayOrder = 620,
@@ -1758,18 +1927,18 @@ local function addTab(name, glyph)
 
     local idx = #tabButtons + 1
     local btn = new("TextButton", {
-        Size = UDim2.new(1, -16, 0, 32),
-        Position = UDim2.fromOffset(8, 8 + (idx - 1) * 36),
+        Size = UDim2.new(1, -14, 0, 30),
+        Position = UDim2.fromOffset(7, 8 + (idx - 1) * 32),
         BackgroundColor3 = THEME.Row,
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         Text = "",
         AutoButtonColor = false,
-    }, rail)
-    new("UICorner", { CornerRadius = UDim.new(0, 6) }, btn)
+    }, tabHolder)
+    new("UICorner", { CornerRadius = UDim.new(0, 7) }, btn)
 
     local marker = new("Frame", {
-        Size = UDim2.fromOffset(3, 16),
+        Size = UDim2.fromOffset(2, 14),
         Position = UDim2.fromOffset(0, 8),
         BackgroundColor3 = THEME.Accent,
         BorderSizePixel = 0,
@@ -1778,19 +1947,20 @@ local function addTab(name, glyph)
     new("UICorner", { CornerRadius = UDim.new(1, 0) }, marker)
 
     local label = new("TextLabel", {
-        Size = UDim2.new(1, -20, 1, 0),
-        Position = UDim2.fromOffset(16, 0),
+        Size = UDim2.new(1, -24, 1, 0),
+        Position = UDim2.fromOffset(18, 0),
         BackgroundTransparency = 1,
         Text = glyph .. "   " .. name,
         TextXAlignment = Enum.TextXAlignment.Left,
         Font = Enum.Font.GothamMedium,
         TextSize = 12,
         TextColor3 = THEME.Sub,
+        TextTruncate = Enum.TextTruncate.AtEnd,
     }, btn)
 
     btn.MouseEnter:Connect(function()
         if selectedTab ~= name then
-            TweenService:Create(btn, TweenInfo.new(0.12), { BackgroundTransparency = 0.9, BackgroundColor3 = THEME.Accent }):Play()
+            TweenService:Create(btn, TweenInfo.new(0.12), { BackgroundTransparency = 0.85 }):Play()
         end
     end)
     btn.MouseLeave:Connect(function()
@@ -1799,19 +1969,20 @@ local function addTab(name, glyph)
         end
     end)
 
-    btn.MouseButton1Click:Connect(function()
+    local function select()
         for tabName, p in pairs(pages) do
             p.frame.Visible = (tabName == name)
         end
         for tabName, b in pairs(tabButtons) do
             local isSel = (tabName == name)
-            b.btn.BackgroundTransparency = isSel and 0.82 or 1
-            b.btn.BackgroundColor3 = THEME.Accent
+            b.btn.BackgroundTransparency = isSel and 0 or 1
             b.label.TextColor3 = isSel and THEME.Text or THEME.Sub
             b.marker.Visible = isSel
         end
         selectedTab = name
-    end)
+    end
+
+    btn.MouseButton1Click:Connect(select)
 
     tabButtons[name] = {
         btn = btn,
@@ -1820,19 +1991,20 @@ local function addTab(name, glyph)
     }
 
     if not selectedTab then
-        selectedTab = name
-        page.frame.Visible = true
-        btn.BackgroundTransparency = 0.82
-        btn.BackgroundColor3 = THEME.Accent
-        marker.Visible = true
-        label.TextColor3 = THEME.Text
+        select()
     end
 
     return page
 end
 
--- ---------- MAIN ----------
-local main = addTab("Main", "◈")
+-- ---------- HOME ----------
+local main = addTab("Home", "⌂")
+
+addSection(main, "Credits")
+addNote(main, BRAND .. " v" .. VERSION .. " - built and maintained by the " .. BRAND .. " team.", THEME.Sub)
+addCopyRow(main, "Copy Discord Server Invite", "https://discord.gg/ojailbreaks")
+addCopyRow(main, "Copy Hub Site", "https://vkorona26-oss.github.io/Tupachub/")
+
 addSection(main, "Character")
 addSlider(main, "Walk Speed", 16, 200, 16, 1, "walkSpeed", function(v) Features.setWalk(v) end)
 addSlider(main, "Jump Power", 50, 300, 50, 1, "jumpPower", function(v) Features.setJump(v) end)
@@ -1846,9 +2018,9 @@ addSection(main, "Flight")
 addToggle(main, "Fly", false, "fly", function(v) Features.fly(v) end)
 addSlider(main, "Fly Speed", 10, 300, 50, 1, "flySpeed", function(v) Features.flySpeed(v) end)
 
--- ---------- GAME + FARM ----------
-local gamePage = addTab("Game", "★")
-local farmPage = addTab("Farm", "⚡")
+-- ---------- GAMES + AUTO FARM ----------
+local gamePage = addTab("Games", "★")
+local farmPage = addTab("Auto Farm", "⚡")
 
 local function callSetter(flag, v)
     if Setters[flag] then pcall(Setters[flag], v) end
@@ -2029,6 +2201,32 @@ addButton(tp, "Teleport To Player", THEME.Text, function()
 end)
 addButton(tp, "Teleport To Cursor", THEME.Text, function() Features.tpMouse() end)
 
+-- ---------- WEBHOOK ----------
+local hook = addTab("Webhook", "✉")
+addSection(hook, "Discord Webhook")
+local hookBox = addTextbox(hook, "URL", "https://discord.com/api/webhooks/...", "webhookUrl")
+addButton(hook, "Send Test Message", THEME.Text, function()
+    Features.webhookTest(hookBox.Text)
+end)
+if CAP.request then
+    addNote(hook, "Paste a Discord webhook URL, then send a test. The URL stays in memory and in your saved config only.", THEME.Sub)
+else
+    addNote(hook, "request() is missing on this executor - webhook sending is off.", THEME.Red)
+end
+
+-- ---------- OPTIMIZATION ----------
+local opt = addTab("Optimization", "◐")
+addSection(opt, "Graphics")
+addToggle(opt, "Low Graphics Mode", false, "lowGfx", function(v) Features.lowGraphics(v) end)
+addNote(opt, "Turns off post effects, atmosphere density and water waves. Restored on toggle off and on unload.", THEME.Sub)
+
+addSection(opt, "Frame Rate")
+if CAP.fpsCap then
+    addSlider(opt, "FPS Cap", 30, 240, 60, 10, "fpsCap", function(v) Features.fpsCap(v) end)
+else
+    addNote(opt, "setfpscap is missing on this executor - frame cap is off.", THEME.Red)
+end
+
 -- ---------- MISC ----------
 local misc = addTab("Misc", "◍")
 addSection(misc, "Server")
@@ -2160,7 +2358,7 @@ Features.unload = function()
 
     if notifHolder then notifHolder:Destroy() end
     if gui then gui:Destroy() end
-    getgenv().OJBHub = nil
+    getgenv().Tupachup = nil
 end
 
 -- ============================================================
@@ -2217,36 +2415,80 @@ minBtn = topButton("–", -66, THEME.Sub, function()
 end)
 
 closeBtn = topButton("×", -32, THEME.Red, function()
-    Features.unload()
+    window.Visible = false
+    notify("Hidden - tap the Tupachup pill or press " .. tostring(menuKey.Name) .. " to reopen", "info")
 end)
 
--- phones have no RightShift: floating reopen button
-if UIS.TouchEnabled then
-    local float = new("TextButton", {
-        Name = "OJBHubFloat",
-        Size = UDim2.fromOffset(46, 46),
-        AnchorPoint = Vector2.new(1, 1),
-        Position = UDim2.new(1, -14, 1, -14),
-        BackgroundColor3 = THEME.Accent,
-        BackgroundTransparency = 0.25,
-        BorderSizePixel = 0,
-        Text = "T",
-        Font = Enum.Font.GothamBlack,
-        TextSize = 18,
-        TextColor3 = Color3.new(1, 1, 1),
-        AutoButtonColor = false,
-        ZIndex = 50,
-    }, gui)
-    new("UICorner", { CornerRadius = UDim.new(1, 0) }, float)
-    float.MouseButton1Click:Connect(function()
-        window.Visible = not window.Visible
-    end)
+-- always-on hide/show pill. Tap it, or the menu key, to bring the window back.
+local pill = new("TextButton", {
+    Name = "TupachupPill",
+    Size = UDim2.fromOffset(104, 30),
+    Position = UDim2.fromOffset(12, 12),
+    BackgroundColor3 = Color3.fromRGB(14, 14, 17),
+    BackgroundTransparency = 0.08,
+    BorderSizePixel = 0,
+    Text = "",
+    AutoButtonColor = false,
+    Visible = false,
+    ZIndex = 60,
+}, gui)
+new("UICorner", { CornerRadius = UDim.new(1, 0) }, pill)
+local pillStroke = new("UIStroke", { Color = THEME.Stroke, Thickness = 1 }, pill)
+local pillMark = new("Frame", {
+    Size = UDim2.fromOffset(16, 16),
+    Position = UDim2.fromOffset(8, 7),
+    BackgroundColor3 = THEME.Accent,
+    BorderSizePixel = 0,
+    ZIndex = 61,
+}, pill)
+new("UICorner", { CornerRadius = UDim.new(0, 5) }, pillMark)
+new("TextLabel", {
+    Size = UDim2.fromScale(1, 1),
+    BackgroundTransparency = 1,
+    Text = "T",
+    Font = Enum.Font.GothamBlack,
+    TextSize = 11,
+    TextColor3 = Color3.fromRGB(22, 16, 10),
+    ZIndex = 62,
+}, pillMark)
+new("TextLabel", {
+    Size = UDim2.new(1, -32, 1, 0),
+    Position = UDim2.fromOffset(30, 0),
+    BackgroundTransparency = 1,
+    Text = BRAND,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Font = Enum.Font.GothamBold,
+    TextSize = 12,
+    TextColor3 = THEME.Text,
+    ZIndex = 61,
+}, pill)
+pill.MouseEnter:Connect(function()
+    TweenService:Create(pillStroke, TweenInfo.new(0.12), { Color = THEME.Accent }):Play()
+end)
+pill.MouseLeave:Connect(function()
+    TweenService:Create(pillStroke, TweenInfo.new(0.12), { Color = THEME.Stroke }):Play()
+end)
+
+local function setWindowVisible(on)
+    window.Visible = on
+    pill.Visible = not on
+    if on and minimized then
+        minimized = false
+        rail.Visible = true
+        pageHolder.Visible = true
+        window.Size = UDim2.fromOffset(WIN_W, WIN_H)
+        minBtn.Text = "–"
+    end
 end
+
+pill.MouseButton1Click:Connect(function()
+    setWindowVisible(true)
+end)
 
 track(UIS.InputBegan:Connect(function(input, processed)
     if processed then return end
     if input.KeyCode == menuKey then
-        window.Visible = not window.Visible
+        setWindowVisible(not window.Visible)
     end
 end))
 
@@ -2256,7 +2498,7 @@ end))
 loadWaypoints()
 renderWaypoints()
 
-getgenv().OJBHub = {
+getgenv().Tupachup = {
     Version = VERSION,
     Unload = Features.unload,
     Flags = Flags,
@@ -2267,7 +2509,7 @@ getgenv().OJBHub = {
     Capabilities = CAP,
 }
 
-notify("OJB HUB v" .. VERSION .. " loaded", "success")
+notify(BRAND .. " v" .. VERSION .. " loaded", "success")
 notify("Game: " .. (GAME_LABEL[activeGame] or "Universal"), "info")
 
-print("[OJB HUB] v" .. VERSION .. " ready | " .. tostring(game.PlaceId))
+print("[" .. BRAND:upper() .. "] v" .. VERSION .. " ready | " .. tostring(game.PlaceId))
