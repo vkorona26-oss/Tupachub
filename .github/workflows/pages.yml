@@ -22,9 +22,21 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
+      # only the served files go into the artifact. Uploading "." shipped .git
+      # and the workflow file too, and the upload step reported success while
+      # publishing no artifact at all - deploy-pages then failed on "Found 0
+      # artifact(s)".
+      - name: Stage site
+        run: |
+          mkdir -p _site
+          cp index.html hub.lua Exec README.md _site/
+          if [ -d assets ]; then cp -r assets _site/; fi
+          find _site -type f | sort
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4
