@@ -78,8 +78,8 @@
     <div class="stats">
       <div><b>4</b><span>games</span></div>
       <div><b>11</b><span>tabs</span></div>
-      <div><b>121 KB</b><span>payload</span></div>
-      <div><b>v1.5.0</b><span>live</span></div>
+      <div><b>126 KB</b><span>payload</span></div>
+      <div><b>v1.5.1</b><span>live</span></div>
     </div>
   </section>
 
@@ -128,6 +128,11 @@
     <p class="eyebrow">Updates</p>
     <h2>Shipping notes.</h2>
     <ol class="timeline">
+      <li>
+        <div class="meta"><span class="ver">v1.5.1</span><time>2026-11-20</time></div>
+        <h3>Quest runner fix</h3>
+        <p>The area row is a TextLabel inside a button. Handing that label to firesignal threw before the pcall could catch it, and the heartbeat swallowed the error - the tab looked alive but did nothing. The runner now resolves a label to its button, clicks are guarded, and any future throw lands in the status line instead of vanishing. Requirement keywords ("coin jars" -&gt; "jar") now reach the prompt filter, and a fly fallback covers maps whose area button does not teleport.</p>
+      </li>
       <li>
         <div class="meta"><span class="ver">v1.5.0</span><time>2026-11-20</time></div>
         <h3>Player card and quest autopilot</h3>

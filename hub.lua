@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.5.0"
+local VERSION = "1.5.1"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -1821,12 +1821,15 @@ end
 
 function PSX.click(btn)
     if not btn then return false end
+    -- a TextLabel has no MouseButton1Click; indexing one throws before pcall
+    -- even runs, which is how a label used to kill the whole quest cycle
+    if not btn:IsA("GuiButton") then return false end
     if not CAP.firesignal then
         notify("firesignal is missing on this executor - cannot click UI", "error")
         return false
     end
-    local ok = pcall(firesignal, btn.MouseButton1Click)
-    if not ok then pcall(firesignal, btn.Activated) end
+    local ok = pcall(function() firesignal(btn.MouseButton1Click) end)
+    if not ok then pcall(function() firesignal(btn.Activated) end) end
     return true
 end
 
@@ -3123,11 +3126,50 @@ function Quest.read()
     return Quest.reqs
 end
 
-function Quest.arm(keys)
+-- the requirement names the thing to hit: "Break 3 coin jars" has to put "jar"
+-- in the prompt filter, or the tool runs with a filter that matches nothing
+local QUEST_STOP = {
+    the = true, ["and"] = true, ["for"] = true, with = true, from = true,
+    ["break"] = true, hatch = true, collect = true, plant = true, sell = true,
+    open = true, complete = true, your = true, quest = true, rank = true,
+    times = true, total = true, reach = true, earn = true, defeat = true,
+}
+
+function Quest.keywords(reqs, key)
+    local out, seen = {}, {}
+    for _, r in ipairs(reqs or {}) do
+        if r.key == key then
+            for word in string.gmatch(string.lower(r.text), "%a+") do
+                if #word > 4 and string.sub(word, -1) == "s" then
+                    word = string.sub(word, 1, -2)
+                end
+                if #word >= 3 and not QUEST_STOP[word] and not seen[word] then
+                    seen[word] = true
+                    out[#out + 1] = word
+                end
+            end
+        end
+    end
+    return out
+end
+
+function Quest.arm(keys, reqs)
     local applied = {}
     for _, key in ipairs(Quest.order) do
         if keys[key] then
-            for flag, value in pairs(Quest.plan[key].set) do
+            local extra = Quest.keywords(reqs, key)
+            for flag, base in pairs(Quest.plan[key].set) do
+                local value = base
+                if flag == "promptFilter" or flag == "touchFilter" then
+                    local added = 0
+                    for _, w in ipairs(extra) do
+                        if not string.find(base, w, 1, true) then
+                            value = value .. ", " .. w
+                            added = added + 1
+                            if added >= 4 then break end
+                        end
+                    end
+                end
                 if Quest.armed[flag] == nil then
                     Quest.armed[flag] = { prev = Flags[flag] }
                 end
@@ -3231,6 +3273,17 @@ function Quest.openPanel()
     return true
 end
 
+-- the match may be a TextLabel inside the area row; the clickable is the
+-- GuiButton above it
+local function clickable(inst)
+    local node = inst
+    while node and node ~= PG do
+        if node:IsA("GuiButton") then return node end
+        node = node.Parent
+    end
+    return nil
+end
+
 -- highest unlocked area the world map is offering
 function Quest.bestArea()
     local best, bestNum, seen = nil, -1, 0
@@ -3252,13 +3305,71 @@ function Quest.bestArea()
                     end
                     local num = tonumber(string.match(low, "(%d+)"))
                     if not locked and num and num > bestNum then
-                        bestNum, best = num, inst
+                        local target = clickable(inst)
+                        if target then
+                            bestNum, best = num, target
+                        end
                     end
                 end
             end
         end
     end
     return best, bestNum
+end
+
+-- when the map button does not teleport, fly the character to the part the
+-- game names after that area
+function Quest.flyTo(num)
+    local hrp = root()
+    if not hrp then return false end
+    local c = LP.Character
+    local hum = c and c:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+
+    local target, bestDist, seen = nil, nil, 0
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        seen = seen + 1
+        if seen > 12000 then break end
+        if obj:IsA("BasePart") then
+            local low = string.lower(obj.Name)
+            local hasWord = false
+            for _, w in ipairs(Quest.areaWords) do
+                if string.find(low, w, 1, true) then hasWord = true break end
+            end
+            if hasWord and tonumber(string.match(low, "(%d+)")) == num then
+                local d = (obj.Position - hrp.Position).Magnitude
+                if not bestDist or d < bestDist then
+                    bestDist, target = d, obj
+                end
+            end
+        end
+    end
+    if not target then return false end
+
+    local bv = new("BodyVelocity", {
+        Name = "TupachupTravel",
+        MaxForce = Vector3.new(1e5, 1e5, 1e5),
+        Velocity = Vector3.zero,
+    }, hrp)
+    local started = os.clock()
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        if not hrp.Parent or os.clock() - started > 15 then
+            conn:Disconnect()
+            if bv.Parent then bv:Destroy() end
+            return
+        end
+        local delta = target.Position - hrp.Position
+        if delta.Magnitude < 7 then
+            conn:Disconnect()
+            if bv.Parent then bv:Destroy() end
+            return
+        end
+        bv.Velocity = delta.Unit * math.min(140, delta.Magnitude * 2)
+    end)
+    track(conn)
+    Quest.travelPart = target
+    return true
 end
 
 -- moves the character with the game's own area button, never a guessed remote
@@ -3271,15 +3382,33 @@ function Quest.travel(force)
     end
     if not PSX.click(btn) then return false, num end
     Quest.area, Quest.areaAt = num, now
+
+    -- the button may only open a preview; if the character has not moved in a
+    -- second and a half, fly to the area part instead
+    if Flags.questFly then
+        local startPos = root() and root().Position
+        task.delay(1.5, function()
+            local hrp = root()
+            if not hrp or not startPos then return end
+            if (hrp.Position - startPos).Magnitude < 6 then
+                pcall(Quest.flyTo, num)
+            end
+        end)
+    end
     return true, num
 end
 
-function Quest.cycle()
+function Quest.step()
     local reqs = Quest.read()
 
     -- nothing readable: click the game's quest button, then look again
     if #reqs == 0 then
+        local now = os.clock()
+        if Quest.panelAt and (now - Quest.panelAt) > 30 then
+            Quest.panelTries = 0
+        end
         if (Quest.panelTries or 0) < 3 and Quest.openPanel() then
+            Quest.panelAt = now
             Quest.panelTries = (Quest.panelTries or 0) + 1
             Quest.setStatus("Opening the quest panel...", THEME.Accent)
             task.delay(0.7, function()
@@ -3296,7 +3425,7 @@ function Quest.cycle()
     local keys = {}
     for _, r in ipairs(reqs) do keys[r.key] = true end
 
-    local applied = Quest.arm(keys)
+    local applied = Quest.arm(keys, reqs)
     local travelled, area = false, 0
     if Flags.questTravel then
         travelled, area = Quest.travel()
@@ -3313,6 +3442,17 @@ function Quest.cycle()
     )
 
     return fired, gifts, #reqs, applied
+end
+
+-- a thrown step used to vanish inside the heartbeat pcall and leave the tab
+-- looking dead; now the reason lands in the status line
+function Quest.cycle()
+    local ok, fired, gifts, count, applied = pcall(Quest.step)
+    if not ok then
+        Quest.setStatus("Runner error: " .. tostring(fired), THEME.Red)
+        return 0, 0, 0, {}
+    end
+    return fired, gifts, count, applied
 end
 
 Features.questPass = function()
@@ -3383,6 +3523,7 @@ addToggle(quest, "Auto Complete Selected Rank Quests", false, "questAuto", funct
     Features.questAuto(on)
 end)
 addToggle(quest, "Travel To Best Unlocked Area", true, "questTravel")
+addToggle(quest, "Fly If The Area Button Does Not Move You", true, "questFly")
 
 addButton(quest, "Read Rank Quests", THEME.Text, function() Features.questRead() end)
 addButton(quest, "Complete Rank Quests Now", THEME.Accent, function() Features.questPass() end)
