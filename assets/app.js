@@ -1,7 +1,10 @@
-// Tupachub — copy button, toast, footer year. No dependencies.
+// Tupachub — copy button, reveal, pointer spotlight, nav state. No dependencies.
 (function () {
   'use strict';
 
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- copy ---------- */
   var line = document.getElementById('script-line');
   var script = line ? line.textContent.trim() : '';
   var toastEl = document.getElementById('toast');
@@ -66,6 +69,57 @@
     });
   }
 
+  /* ---------- nav border on scroll ---------- */
+  var nav = document.querySelector('.nav');
+  if (nav) {
+    var onScroll = function () {
+      nav.classList.toggle('scrolled', window.scrollY > 8);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+  }
+
+  /* ---------- reveal on scroll ---------- */
+  if (!reduceMotion && 'IntersectionObserver' in window) {
+    var targets = [];
+    var sections = document.querySelectorAll('.section');
+    for (var s = 0; s < sections.length; s++) {
+      var head = sections[s].querySelectorAll('.eyebrow, h2');
+      for (var h = 0; h < head.length; h++) targets.push(head[h]);
+      var cards = sections[s].querySelectorAll('.card, .feat, .timeline li, .note');
+      for (var c = 0; c < cards.length; c++) targets.push(cards[c]);
+    }
+    for (var t = 0; t < targets.length; t++) {
+      targets[t].setAttribute('data-reveal', '');
+      targets[t].style.transitionDelay = ((t % 6) * 45) + 'ms';
+    }
+
+    var io = new IntersectionObserver(function (entries) {
+      for (var e = 0; e < entries.length; e++) {
+        if (entries[e].isIntersecting) {
+          entries[e].target.classList.add('in');
+          io.unobserve(entries[e].target);
+        }
+      }
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+
+    for (var k = 0; k < targets.length; k++) io.observe(targets[k]);
+  }
+
+  /* ---------- pointer spotlight on cards ---------- */
+  if (!reduceMotion && window.matchMedia('(hover: hover)').matches) {
+    var cardsAll = document.querySelectorAll('.card, .feat');
+    var bind = function (card) {
+      card.addEventListener('pointermove', function (event) {
+        var rect = card.getBoundingClientRect();
+        card.style.setProperty('--mx', (event.clientX - rect.left) + 'px');
+        card.style.setProperty('--my', (event.clientY - rect.top) + 'px');
+      });
+    };
+    for (var n = 0; n < cardsAll.length; n++) bind(cardsAll[n]);
+  }
+
+  /* ---------- footer year ---------- */
   var year = document.getElementById('year');
   if (year) year.textContent = String(new Date().getFullYear());
 })();
