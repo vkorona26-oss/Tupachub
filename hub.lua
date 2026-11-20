@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.6.0"
+local VERSION = "1.7.0"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -1794,6 +1794,25 @@ local PSX = {
 
 local GUI_SCAN_CAP = 4000
 
+-- The hub's own window sits in PlayerGui as well. Walking it burns the scan
+-- budget and can push the game's real buttons past the cap, so every scan
+-- starts from PlayerGui children and skips our ScreenGui.
+local function eachGameGui(fn)
+    local seen = 0
+    for _, root in ipairs(PG:GetChildren()) do
+        if root ~= gui then
+            seen = seen + 1
+            if seen > GUI_SCAN_CAP then return end
+            if fn(root) == false then return end
+            for _, inst in ipairs(root:GetDescendants()) do
+                seen = seen + 1
+                if seen > GUI_SCAN_CAP then return end
+                if fn(inst) == false then return end
+            end
+        end
+    end
+end
+
 local function isShown(inst)
     local node = inst
     while node and node ~= PG do
@@ -1805,18 +1824,20 @@ local function isShown(inst)
 end
 
 function PSX.findButton(words)
-    local seen = 0
-    for _, inst in ipairs(PG:GetDescendants()) do
-        seen = seen + 1
-        if seen > GUI_SCAN_CAP then break end
+    local hit
+    eachGameGui(function(inst)
         if inst:IsA("GuiButton") and isShown(inst) then
             local hay = string.lower(inst.Name) .. " " .. string.lower(inst.Text or "")
             for _, w in ipairs(words) do
-                if string.find(hay, w, 1, true) then return inst end
+                if string.find(hay, w, 1, true) then
+                    hit = inst
+                    return false
+                end
             end
         end
-    end
-    return nil
+        return nil
+    end)
+    return hit
 end
 
 function PSX.click(btn)
@@ -2617,7 +2638,10 @@ local AUTO_BREAK_WORDS = {
 
 local function autoThrottle(key, seconds)
     local now = os.clock()
-    if now - (Auto.last[key] or 0) < seconds then return false end
+    local last = Auto.last[key]
+    -- a nil last means never fired. Comparing against 0 would block the first
+    -- click for `seconds` on a freshly started client, where os.clock is small.
+    if last and (now - last) < seconds then return false end
     Auto.last[key] = now
     return true
 end
@@ -2625,17 +2649,15 @@ end
 -- words: at least one must appear. avoid: none may appear. context: if given,
 -- at least one of these must also appear.
 local function autoFind(words, avoid, context)
-    local seen = 0
-    for _, inst in ipairs(PG:GetDescendants()) do
-        seen = seen + 1
-        if seen > GUI_SCAN_CAP then break end
+    local hit
+    eachGameGui(function(inst)
         if inst:IsA("GuiButton") and isShown(inst) then
             local hay = string.lower(inst.Name) .. " " .. string.lower(inst.Text or "")
-            local hit = false
+            local matched = false
             for _, w in ipairs(words) do
-                if string.find(hay, w, 1, true) then hit = true break end
+                if string.find(hay, w, 1, true) then matched = true break end
             end
-            if hit then
+            if matched then
                 local blocked = false
                 for _, w in ipairs(avoid or {}) do
                     if string.find(hay, w, 1, true) then blocked = true break end
@@ -2646,11 +2668,15 @@ local function autoFind(words, avoid, context)
                         if string.find(hay, w, 1, true) then blocked = false break end
                     end
                 end
-                if not blocked then return inst end
+                if not blocked then
+                    hit = inst
+                    return false
+                end
             end
         end
-    end
-    return nil
+        return nil
+    end)
+    return hit
 end
 
 function Auto.use(words, key, seconds, avoid, context)
@@ -2663,10 +2689,7 @@ end
 -- dropdown food: the names the game is actually showing
 function Auto.options(words, fallback, cap)
     local out, seen = {}, {}
-    local scanned = 0
-    for _, inst in ipairs(PG:GetDescendants()) do
-        scanned = scanned + 1
-        if scanned > GUI_SCAN_CAP then break end
+    eachGameGui(function(inst)
         if inst:IsA("GuiButton") and isShown(inst) then
             local text = cleanText(inst.Text or "")
             local low = string.lower(text)
@@ -2679,9 +2702,10 @@ function Auto.options(words, fallback, cap)
                     end
                 end
             end
-            if #out >= cap then break end
+            if #out >= cap then return false end
         end
-    end
+        return nil
+    end)
     if #out == 0 then return fallback end
     table.sort(out)
     return out
@@ -2747,6 +2771,53 @@ function Auto.tapPoint(vp)
     )
 end
 
+-- switches from the extra tabs. Each row is one toggle: the flag that turns it
+-- on, the button words to look for, its own cooldown key and default delay.
+local AUTO_RULES = {
+    -- Mailbox
+    { flag = "autoMail", key = "mail", seconds = 3,
+      words = { "claim all", "collect all", "claim", "collect", "mail", "gift" } },
+    -- Current Event
+    { flag = "autoEventReward", key = "eventreward", seconds = 4,
+      words = { "claim", "collect", "reward", "event" } },
+    { flag = "autoEventUse", key = "eventuse", seconds = 3,
+      words = { "use", "open", "event item", "event" } },
+    -- Fishing World
+    { flag = "autoCast", key = "cast", seconds = 2,
+      words = { "cast", "fish" } },
+    { flag = "autoReel", key = "reel", seconds = 1.5,
+      words = { "reel", "hook", "catch" } },
+    { flag = "autoSellFish", key = "sellfish", seconds = 6,
+      words = { "sell" }, context = { "fish" } },
+    -- Farming World
+    { flag = "autoPlant", key = "plant", seconds = 2,
+      words = { "plant", "seed" } },
+    { flag = "autoHarvest", key = "harvest", seconds = 2,
+      words = { "harvest", "collect", "pick" } },
+    { flag = "autoWater", key = "water", seconds = 8,
+      words = { "water" } },
+    { flag = "autoSellCrop", key = "sellcrop", seconds = 6,
+      words = { "sell" }, context = { "crop", "farm", "garden", "fruit" } },
+    -- Egg
+    { flag = "autoHatch", key = "hatch", seconds = 1, delayFlag = "hatchDelay",
+      words = { "hatch", "egg", "open" } },
+    { flag = "autoEquipBest", key = "equipbest", seconds = 6,
+      words = { "equip best", "best pet", "equip" } },
+    -- Daycare
+    { flag = "autoDaycare", key = "daycare", seconds = 5,
+      words = { "daycare", "claim", "collect" }, context = { "daycare", "pet" } },
+    -- Minigames
+    { flag = "autoMinigame", key = "minigame", seconds = 5,
+      words = { "play", "join", "start" }, context = { "minigame", "game", "arena" } },
+    { flag = "autoMinigameReward", key = "minigamereward", seconds = 6,
+      words = { "claim", "reward" }, context = { "minigame", "game", "arena" } },
+    -- Automatic
+    { flag = "autoClaimAll", key = "claimall", seconds = 4,
+      words = { "claim all", "collect all", "claim", "collect", "reward" } },
+    { flag = "autoSellAll", key = "sellall", seconds = 8,
+      words = { "sell all", "sell" } },
+}
+
 function Auto.tick()
     -- keeps re-applying so the game cannot drop the speed back down
     if Flags.infinitePetSpeed then
@@ -2776,7 +2847,16 @@ function Auto.tick()
     if Flags.autoTNTCrate then
         Auto.use({ "tnt crate", "crate" }, "tntcrate", Flags.tntCrateDelay or 15)
     end
+
+    -- everything the extra tabs switch on: one row per switch, same engine
+    for _, rule in ipairs(AUTO_RULES) do
+        if Flags[rule.flag] then
+            Auto.use(rule.words, rule.key, Flags[rule.delayFlag] or rule.seconds, rule.avoid, rule.context)
+        end
+    end
 end
+
+Auto.rules = AUTO_RULES
 
 -- the quest runner arms the same engine through these flags
 bind("autoPrompt", function(v)
@@ -2820,15 +2900,20 @@ local selectedTab
 -- than no icon: the dot always renders.
 local tabIndex = 0
 
-local function addTab(name)
+-- Tab row: emoji icon, label, and an explicit slot so the sidebar order is the
+-- spec's order, not the order the sections happen to be written in.
+local TAB_SLOT = 0
+local function addTab(name, icon, order)
     local page = makePage()
     pages[name] = page
 
     tabIndex = tabIndex + 1
-    local idx = tabIndex
+    TAB_SLOT = TAB_SLOT + 1
+    local idx = order or TAB_SLOT
     local btn = new("TextButton", {
+        Name = "Tab_" .. name,
         Size = UDim2.new(1, -14, 0, 28),
-        Position = UDim2.fromOffset(7, 6 + (idx - 1) * 29),
+        Position = UDim2.fromOffset(7, 6 + (idx - 1) * 30),
         BackgroundColor3 = THEME.Row,
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
@@ -2846,17 +2931,22 @@ local function addTab(name)
     }, btn)
     new("UICorner", { CornerRadius = UDim.new(1, 0) }, marker)
 
-    local dot = new("Frame", {
-        Size = UDim2.fromOffset(5, 5),
-        Position = UDim2.fromOffset(12, 11),
-        BackgroundColor3 = THEME.Sub,
-        BorderSizePixel = 0,
+    local glyph = new("TextLabel", {
+        Name = "Icon",
+        Size = UDim2.fromOffset(18, 28),
+        Position = UDim2.fromOffset(9, 0),
+        BackgroundTransparency = 1,
+        Text = icon or "",
+        TextXAlignment = Enum.TextXAlignment.Center,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        Font = Enum.Font.Gotham,
+        TextSize = 13,
+        TextTransparency = 0.15,
     }, btn)
-    new("UICorner", { CornerRadius = UDim.new(1, 0) }, dot)
 
     local label = new("TextLabel", {
-        Size = UDim2.new(1, -34, 1, 0),
-        Position = UDim2.fromOffset(24, 0),
+        Size = UDim2.new(1, -42, 1, 0),
+        Position = UDim2.fromOffset(32, 0),
         BackgroundTransparency = 1,
         Text = name,
         TextXAlignment = Enum.TextXAlignment.Left,
@@ -2885,7 +2975,7 @@ local function addTab(name)
             local isSel = (tabName == name)
             b.btn.BackgroundTransparency = isSel and 0 or 1
             b.label.TextColor3 = isSel and THEME.Text or THEME.Sub
-            b.dot.BackgroundColor3 = isSel and THEME.Accent or THEME.Sub
+            b.icon.TextTransparency = isSel and 0 or 0.25
             b.marker.Visible = isSel
         end
         selectedTab = name
@@ -2896,7 +2986,7 @@ local function addTab(name)
     tabButtons[name] = {
         btn = btn,
         marker = marker,
-        dot = dot,
+        icon = glyph,
         label = label,
     }
 
@@ -2908,7 +2998,7 @@ local function addTab(name)
 end
 
 -- ---------- HOME ----------
-local main = addTab("Home")
+local main = addTab("Home", "🏠", 1)
 
 addSection(main, "Credits")
 addNote(main, BRAND .. " v" .. VERSION .. " - built and maintained by the " .. BRAND .. " team.", THEME.Sub)
@@ -2929,13 +3019,13 @@ addToggle(main, "Fly", false, "fly", function(v) Features.fly(v) end)
 addSlider(main, "Fly Speed", 10, 300, 50, 1, "flySpeed", function(v) Features.flySpeed(v) end)
 
 -- ---------- GAMES + AUTO FARM ----------
-local gamePage = addTab("Games")
+local gamePage = addTab("Main", "🏡", 12)
 -- the whole farm page lives in its own block: the compiler frees its locals at
 -- the end, and the main chunk is already near the 200-local ceiling.
 -- callSetter stays outside because the quest runner drives the same flags.
 local callSetter
 do
-local farmPage = addTab("Auto Farm")
+local farmPage = addTab("Farm", "🖱️", 9)
 
 function callSetter(flag, v)
     if Setters[flag] then pcall(Setters[flag], v) end
@@ -3114,8 +3204,8 @@ end
 
 buildGamePage(activeGame)
 
--- ---------- VISUALS ----------
-local vis = addTab("Visuals")
+-- ---------- PLAYER (visuals + teleport) ----------
+local vis = addTab("Player", "👤", 16)
 addSection(vis, "Players")
 addToggle(vis, "Player ESP", false, "esp", function(v) Features.esp(v) end)
 addToggle(vis, "ESP Names + Health", false, "espNames", function(v) Features.espNames(v) end)
@@ -3123,27 +3213,25 @@ addSection(vis, "Environment")
 addToggle(vis, "Fullbright", false, "fullbright", function(v) Features.fullbright(v) end)
 addSlider(vis, "Camera FOV", 70, 120, 70, 1, "fov", function(v) Features.fov(v) end)
 
--- ---------- TELEPORT ----------
-local tp = addTab("Teleport")
-addSection(tp, "Waypoints")
-local wpName = addTextbox(tp, "Name", "spawn", "wpName")
-addButton(tp, "Save Current Position", THEME.Text, function()
+addSection(vis, "Teleport Waypoints")
+local wpName = addTextbox(vis, "Name", "spawn", "wpName")
+addButton(vis, "Save Current Position", THEME.Text, function()
     addWaypoint(wpName.Text)
 end)
-waypointPanel = addPanel(tp, 150)
-addSection(tp, "Targets")
-addDropdown(tp, "Player", playerNames, "-", "tpTarget", function(v) Features.tpPlayer(v) end)
-addButton(tp, "Teleport To Player", THEME.Text, function()
+waypointPanel = addPanel(vis, 150)
+addSection(vis, "Teleport Targets")
+addDropdown(vis, "Player", playerNames, "-", "tpTarget", function(v) Features.tpPlayer(v) end)
+addButton(vis, "Teleport To Player", THEME.Text, function()
     if Flags.tpTarget and Flags.tpTarget ~= "-" then
         Features.tpPlayer(Flags.tpTarget)
     else
         notify("Pick a player first", "error")
     end
 end)
-addButton(tp, "Teleport To Cursor", THEME.Text, function() Features.tpMouse() end)
+addButton(vis, "Teleport To Cursor", THEME.Text, function() Features.tpMouse() end)
 
 -- ---------- WEBHOOK ----------
-local hook = addTab("Webhook")
+local hook = addTab("Webhook", "🪝", 2)
 addSection(hook, "Discord Webhook")
 local hookBox = addTextbox(hook, "URL", "https://discord.com/api/webhooks/...", "webhookUrl")
 addButton(hook, "Send Test Message", THEME.Text, function()
@@ -3156,7 +3244,7 @@ else
 end
 
 -- ---------- OPTIMIZATION ----------
-local opt = addTab("Optimization")
+local opt = addTab("Optimization", "🪄", 4)
 
 addSection(opt, "Game Objects")
 addToggle(opt, "Disable Breakables Models", false, "noBreakables", function(v) Features.renderFilter(v) end)
@@ -3178,7 +3266,8 @@ else
 end
 
 -- ---------- PSX ----------
-local psx = addTab("PSX")
+do
+local psx = addTab("PSX Classic", "🕹️", 5)
 
 addSection(psx, "PSX Classic")
 addMultiSelect(psx, "Select Goals to Complete in PSX...",
@@ -3545,10 +3634,8 @@ end
 -- highest unlocked area the world map is offering
 function Quest.bestArea(words)
     words = words or Quest.areaWords
-    local best, bestNum, seen = nil, -1, 0
-    for _, inst in ipairs(PG:GetDescendants()) do
-        seen = seen + 1
-        if seen > GUI_SCAN_CAP then break end
+    local best, bestNum = nil, -1
+    eachGameGui(function(inst)
         if (inst:IsA("GuiButton") or inst:IsA("TextLabel")) and isShown(inst) then
             local text = cleanText(inst.Text or inst.Name or "")
             local low = string.lower(text)
@@ -3572,7 +3659,8 @@ function Quest.bestArea(words)
                 end
             end
         end
-    end
+        return nil
+    end)
     return best, bestNum
 end
 
@@ -3771,8 +3859,10 @@ Stops.Quest = function()
     pcall(Quest.disarm)
 end
 
+end
 -- ---------- QUEST ----------
-local quest = addTab("Quest")
+do
+local quest = addTab("Quest", "🏆", 11)
 
 addSection(quest, "Rank Quest")
 addSlider(quest, "Select Max Rank", 1, 40, 40, 1, "questMaxRank", nil, " Ranks")
@@ -3795,8 +3885,132 @@ addButton(quest, "Complete Rank Quests Now", THEME.Accent, function() Features.q
 questStatusLabel = addNote(quest, "Idle. Switch Auto Complete on - the runner opens the panel itself.", THEME.Sub)
 addNote(quest, "Reads the requirement lines, moves to the highest unlocked area, arms the matching farm tool, then claims. Tools restore when switched off.", THEME.Sub)
 
+-- ---------- MAILBOX ----------
+-- every extra tab lives in its own block so its locals are freed; the main
+-- chunk is close to Lua's 200-local ceiling
+do
+local mail = addTab("Mailbox", "📬", 3)
+
+addSection(mail, "Mailbox")
+addButton(mail, "Open Mailbox", THEME.Text, function()
+    if Auto.use({ "mailbox", "mail", "inbox" }, "openmail", 0) then
+        notify("Mailbox opened", "info", "Mailbox")
+    else
+        notify("No mailbox button on screen - open it once in game", "error", "Mailbox")
+    end
+end)
+addToggle(mail, "Auto Claim Mail", false, "autoMail")
+addButton(mail, "Claim All Now", THEME.Accent, function()
+    local hit = Auto.use({ "claim all", "collect all", "claim", "collect", "gift" }, "mailnow", 0)
+    notify(hit and "Claim fired" or "No claim button found", hit and "success" or "error", "Mailbox")
+end)
+addNote(mail, "Looks for the game's own Claim / Collect buttons inside the mailbox window. Keeps a 3 second gap so a double click cannot skip a reward.", THEME.Sub)
+
+-- ---------- CURRENT EVENT ----------
+local ev = addTab("Current Event", "📅", 6)
+
+addSection(ev, "Event")
+addButton(ev, "Travel To Event Area", THEME.Accent, function()
+    local moved, num = Quest.travel(true, { "event", "limited", "season", "current", "festival" }, "event")
+    notify(moved and ("Moving to the event area" .. (num > 0 and (" " .. num) or "")) or "No event area button found",
+        moved and "success" or "error", "Event")
+end)
+addToggle(ev, "Auto Claim Event Rewards", false, "autoEventReward")
+addToggle(ev, "Auto Use Event Items", false, "autoEventUse")
+addNote(ev, "The event area is found the same way the quest runner finds an area: the game's own labelled button, highest unlocked number first.", THEME.Sub)
+
+-- ---------- FISHING WORLD ----------
+local fish = addTab("Fishing World", "🎣", 7)
+
+addSection(fish, "Travel")
+addButton(fish, "Travel To Fishing World", THEME.Accent, function()
+    local moved = Quest.travel(true, { "fishing", "fish", "ocean", "sea", "aqua" }, "fishing")
+    notify(moved and "Moving to the fishing world" or "No fishing world button found",
+        moved and "success" or "error", "Fishing")
+end)
+
+addSection(fish, "Automation")
+addToggle(fish, "Auto Cast", false, "autoCast")
+addToggle(fish, "Auto Reel", false, "autoReel")
+addToggle(fish, "Auto Sell Fish", false, "autoSellFish")
+addNote(fish, "Cast and reel are separate switches: some games want the cast button only, some fire the reel automatically. Sell only clicks a button that also mentions fish.", THEME.Sub)
+
+-- ---------- FARMING WORLD ----------
+local farmw = addTab("Farming World", "🚜", 8)
+
+addSection(farmw, "Travel")
+addButton(farmw, "Travel To Farming World", THEME.Accent, function()
+    local moved = Quest.travel(true, { "farming", "farm", "garden", "plot", "ranch" }, "farming")
+    notify(moved and "Moving to the farming world" or "No farming world button found",
+        moved and "success" or "error", "Farming")
+end)
+
+addSection(farmw, "Automation")
+addToggle(farmw, "Auto Plant", false, "autoPlant")
+addToggle(farmw, "Auto Harvest", false, "autoHarvest")
+addToggle(farmw, "Auto Water", false, "autoWater")
+addToggle(farmw, "Auto Sell Crops", false, "autoSellCrop")
+addNote(farmw, "Plant, harvest and water run on their own timers, so a slow plot animation cannot block the next action. Sell only fires a button that names crops, farm or garden.", THEME.Sub)
+
+-- ---------- EGG ----------
+local egg = addTab("Egg", "🥚", 10)
+
+addSection(egg, "Hatching")
+addToggle(egg, "Auto Hatch Egg", false, "autoHatch")
+addSlider(egg, "Hatch Delay", 0.3, 10, 1, 0.1, "hatchDelay", nil, " Seconds")
+addButton(egg, "Open All Eggs Now", THEME.Accent, function()
+    local hit = Auto.use({ "open all", "hatch all", "open", "hatch" }, "openall", 0)
+    notify(hit and "Egg button fired" or "No egg button found", hit and "success" or "error", "Egg")
+end)
+
+addSection(egg, "Pets")
+addToggle(egg, "Auto Equip Best Pet", false, "autoEquipBest")
+addNote(egg, "The hatch switch clicks whatever the game labels Hatch / Open / Egg. Lower the delay only if your executor keeps up - 1 second is safe on mobile.", THEME.Sub)
+
+-- ---------- DAYCARE ----------
+local day = addTab("Daycare", "🏫", 13)
+
+addSection(day, "Daycare")
+addButton(day, "Travel To Daycare", THEME.Text, function()
+    local moved = Quest.travel(true, { "daycare", "day care", "nursery" }, "daycare")
+    notify(moved and "Moving to the daycare" or "No daycare button found",
+        moved and "success" or "error", "Daycare")
+end)
+addToggle(day, "Auto Collect Daycare", false, "autoDaycare")
+addNote(day, "Collect only fires a button that also mentions daycare or pet, so a generic Claim elsewhere on screen cannot take the click.", THEME.Sub)
+
+-- ---------- AUTOMATIC ----------
+local autoTab = addTab("Automatic", "🤖", 14)
+
+addSection(autoTab, "One Switch")
+addToggle(autoTab, "Full Auto (Farm + Quest + Claims)", false, "autoFull", function(on)
+    callSetter("fastFarm", on)
+    callSetter("questAuto", on)
+    callSetter("autoClaimAll", on)
+    notify(on and "Full auto on: farm, quests and claims" or "Full auto off, tools restored",
+        on and "success" or "info", "Automatic")
+end)
+addToggle(autoTab, "Auto Claim Everything", false, "autoClaimAll")
+addToggle(autoTab, "Auto Sell Everything", false, "autoSellAll")
+addNote(autoTab, "Full Auto is the three switches above it, wired together. Turning it off puts every tool back the way it was.", THEME.Sub)
+
+-- ---------- MINIGAMES ----------
+local mini = addTab("Minigames", "🎮", 15)
+
+addSection(mini, "Minigames")
+addButton(mini, "Travel To Minigames", THEME.Accent, function()
+    local moved = Quest.travel(true, { "minigame", "minigames", "arena", "arcade", "game" }, "minigames")
+    notify(moved and "Moving to the minigames" or "No minigame button found",
+        moved and "success" or "error", "Minigames")
+end)
+addToggle(mini, "Auto Play Minigames", false, "autoMinigame")
+addToggle(mini, "Auto Claim Minigame Rewards", false, "autoMinigameReward")
+addNote(mini, "Play and claim only accept buttons whose label also mentions minigame, arena or arcade, so a lobby Claim cannot be mistaken for a reward.", THEME.Sub)
+end
+
+end
 -- ---------- MISC ----------
-local misc = addTab("Misc")
+local misc = addTab("Misc", "🎛️", 17)
 
 addSection(misc, "Protection")
 addToggle(misc, "Anti-Kick", false, "antiKick", function(v) Features.antiKick(v) end)
@@ -3812,8 +4026,8 @@ addButton(misc, "Join Instance", THEME.Text, function() Features.joinJob(jobBox.
 addButton(misc, "Copy JobId", THEME.Text, function() Features.copyJob() end)
 addButton(misc, "Copy PlaceId", THEME.Text, function() Features.copyPlace() end)
 
--- ---------- SETTINGS ----------
-local set = addTab("Settings")
+-- ---------- MISC + SETTINGS ----------
+local set = misc
 addSection(set, "Interface")
 addSlider(set, "UI Transparency", 0, 60, 0, 5, "uiAlpha", function(v)
     gui.Enabled = true
