@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.8.0"
+local VERSION = "1.8.1"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -4373,6 +4373,8 @@ getgenv().Tupachup = {
     Quest = Quest,
     Auto = Auto,
     CallSetter = callSetter,
+    Pages = pages,
+    Setters = Setters,
     Protect = Protect,
     Game = activeGame,
     Detected = DETECTED_NAME,
