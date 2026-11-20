@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.4.2"
+local VERSION = "1.4.3"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -2826,15 +2826,17 @@ function Quest.read()
             and inst.Text ~= "" and isShown(inst) then
             local text = cleanText(inst.Text)
             local low = string.lower(text)
-            if #text >= 4 and #text <= 90 and not seen[low]
-                and string.find(low, "%d") then
+            if #text >= 4 and #text <= 90 and not seen[low] then
                 local key = Quest.classify(low)
-                if key then
+                local isQuestNode = key and underQuestNode(inst)
+                -- a quest-named panel is trusted on its own; anywhere else the
+                -- line needs a number before it counts as a requirement
+                if key and (isQuestNode or string.find(low, "%d")) then
                     seen[low] = true
                     local entry = { text = text, key = key }
-                    if underQuestNode(inst) then
+                    if isQuestNode then
                         primary[#primary + 1] = entry
-                    elseif string.find(low, "%d+%s*/%s*%d+") then
+                    else
                         fallback[#fallback + 1] = entry
                     end
                 end
