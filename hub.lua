@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.2.1"
+local VERSION = "1.3.0"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -43,6 +43,7 @@ local CAP = {
         or type(http_request) == "function"
         or (type(syn) == "table" and type(syn.request) == "function"),
     fpsCap    = type(setfpscap) == "function",
+    firesignal = type(firesignal) == "function",
     mouse     = type(mouse1click) == "function",
 }
 
@@ -885,6 +886,153 @@ local function addDropdown(page, label, optionsFn, default, flag, cb)
     return valueLbl
 end
 
+-- multi-select list: summary on the right, checkbox popup on tap
+local function addMultiSelect(page, label, options, default, flag, cb)
+    local row = rowBase(page, 32)
+    new("TextLabel", {
+        Size = UDim2.new(1, -150, 1, 0),
+        Position = UDim2.fromOffset(10, 0),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        TextColor3 = THEME.Text,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+
+    local picked = {}
+    for _, v in ipairs(default or {}) do picked[v] = true end
+
+    local valueLbl = new("TextLabel", {
+        Size = UDim2.fromOffset(120, 20),
+        Position = UDim2.new(1, -132, 0.5, -10),
+        BackgroundTransparency = 1,
+        Text = "Select options  v",
+        TextXAlignment = Enum.TextXAlignment.Right,
+        Font = Enum.Font.GothamBold,
+        TextSize = 11,
+        TextColor3 = THEME.Sub,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+
+    local function summary()
+        local count, first = 0, nil
+        for _, opt in ipairs(options) do
+            if picked[opt] then
+                count = count + 1
+                first = first or opt
+            end
+        end
+        if count == 0 then
+            valueLbl.Text = "Select options  v"
+            valueLbl.TextColor3 = THEME.Sub
+        elseif count == 1 then
+            valueLbl.Text = first .. "  v"
+            valueLbl.TextColor3 = THEME.Accent
+        else
+            valueLbl.Text = count .. " selected  v"
+            valueLbl.TextColor3 = THEME.Accent
+        end
+    end
+
+    local function commit()
+        local out = {}
+        for _, opt in ipairs(options) do
+            if picked[opt] then out[#out + 1] = opt end
+        end
+        Flags[flag] = out
+        summary()
+        if cb then task.spawn(cb, out) end
+    end
+
+    summary()
+
+    local hit = new("TextButton", {
+        Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+        Text = "",
+    }, row)
+
+    hit.MouseButton1Click:Connect(function()
+        local blocker = new("TextButton", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundTransparency = 1,
+            Text = "",
+            ZIndex = 40,
+        }, window)
+
+        local visible = math.min(#options, 6)
+        local pop = new("Frame", {
+            Size = UDim2.fromOffset(200, visible * 26 + 8),
+            Position = UDim2.fromOffset(
+                row.AbsolutePosition.X - window.AbsolutePosition.X + row.AbsoluteSize.X - 200,
+                row.AbsolutePosition.Y - window.AbsolutePosition.Y + row.AbsoluteSize.Y + 4
+            ),
+            BackgroundColor3 = THEME.Panel,
+            BorderSizePixel = 0,
+            ZIndex = 41,
+            ClipsDescendants = true,
+        }, window)
+        new("UICorner", { CornerRadius = UDim.new(0, 7) }, pop)
+        new("UIStroke", { Color = THEME.Stroke, Thickness = 1 }, pop)
+
+        local list = new("ScrollingFrame", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            CanvasSize = UDim2.fromOffset(0, #options * 26),
+            ScrollBarThickness = 3,
+            ScrollBarImageColor3 = THEME.Stroke,
+            ZIndex = 41,
+        }, pop)
+
+        local function close()
+            blocker:Destroy()
+            pop:Destroy()
+        end
+        blocker.MouseButton1Click:Connect(close)
+
+        for i, opt in ipairs(options) do
+            local o = new("TextButton", {
+                Size = UDim2.new(1, 0, 0, 26),
+                Position = UDim2.fromOffset(0, (i - 1) * 26),
+                BackgroundTransparency = 1,
+                Text = (picked[opt] and "  [x] " or "  [ ] ") .. tostring(opt),
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 12,
+                TextColor3 = picked[opt] and THEME.Text or THEME.Sub,
+                ZIndex = 42,
+                AutoButtonColor = false,
+            }, list)
+            o.MouseEnter:Connect(function()
+                o.BackgroundTransparency = 0.85
+                o.BackgroundColor3 = THEME.Accent
+            end)
+            o.MouseLeave:Connect(function()
+                o.BackgroundTransparency = 1
+            end)
+            o.MouseButton1Click:Connect(function()
+                picked[opt] = not picked[opt] or nil
+                o.Text = (picked[opt] and "  [x] " or "  [ ] ") .. tostring(opt)
+                o.TextColor3 = picked[opt] and THEME.Text or THEME.Sub
+                commit()
+            end)
+        end
+    end)
+
+    bind(flag, function(v)
+        if type(v) ~= "table" then return end
+        picked = {}
+        for _, item in ipairs(v) do picked[item] = true end
+        summary()
+    end)
+
+    commit()
+    return valueLbl
+end
+
 local function addNote(page, text, color)
     local l = new("TextLabel", {
         Size = UDim2.new(0, page.w, 0, 30),
@@ -1453,6 +1601,121 @@ do
         pcall(Render.scan)
     end))
 end
+
+-- ============================================================
+-- PSX CLASSIC
+-- ============================================================
+-- Pet Simulator X Classic is reached through the game's own UI. Nothing here
+-- guesses a remote: it finds the on-screen button by label and fires its click.
+local PSX = {
+    goals = {},
+    -- FILL: drop the PSX Classic PlaceId here if you want a hard teleport
+    -- fallback. 0 = only the in-game button is used.
+    placeId = 0,
+    goalWords = {
+        Rewards = { "classic reward", "rewards" },
+        Index   = { "classic index", "index" },
+        Daily   = { "daily reward", "daily" },
+        Quests  = { "quest", "goal" },
+        Eggs    = { "egg" },
+        Bank    = { "bank" },
+    },
+}
+
+local GUI_SCAN_CAP = 4000
+
+local function isShown(inst)
+    local node = inst
+    while node and node ~= PG do
+        if node == gui then return false end
+        if node:IsA("GuiObject") and node.Visible == false then return false end
+        node = node.Parent
+    end
+    return true
+end
+
+function PSX.findButton(words)
+    local seen = 0
+    for _, inst in ipairs(PG:GetDescendants()) do
+        seen = seen + 1
+        if seen > GUI_SCAN_CAP then break end
+        if inst:IsA("GuiButton") and isShown(inst) then
+            local hay = string.lower(inst.Name) .. " " .. string.lower(inst.Text or "")
+            for _, w in ipairs(words) do
+                if string.find(hay, w, 1, true) then return inst end
+            end
+        end
+    end
+    return nil
+end
+
+function PSX.click(btn)
+    if not btn then return false end
+    if not CAP.firesignal then
+        notify("firesignal is missing on this executor - cannot click UI", "error")
+        return false
+    end
+    local ok = pcall(firesignal, btn.MouseButton1Click)
+    if not ok then pcall(firesignal, btn.Activated) end
+    return true
+end
+
+function PSX.join()
+    local btn = PSX.findButton({ "psx classic", "psx", "classic" })
+    if btn and PSX.click(btn) then
+        notify("PSX Classic: fired " .. btn.Name, "success")
+        return true
+    end
+    if PSX.placeId and PSX.placeId > 0 then
+        local ok = pcall(function()
+            TeleportService:Teleport(PSX.placeId, LP)
+        end)
+        if ok then
+            notify("PSX Classic: teleporting", "success")
+            return true
+        end
+    end
+    notify("PSX Classic button not on screen - open the PSX menu first", "error")
+    return false
+end
+
+function PSX.openGoal(name)
+    local words = PSX.goalWords[name] or { string.lower(name) }
+    local btn = PSX.findButton(words)
+    if btn then
+        PSX.click(btn)
+        return true
+    end
+    notify("No button matched: " .. tostring(name), "error")
+    return false
+end
+
+Features.psxJoin = function() return PSX.join() end
+Features.psxGoal = function(name) return PSX.openGoal(name) end
+
+-- auto join runs once per execution, three seconds after load
+Features.psxAutoJoin = function(on)
+    if not on then return end
+    task.delay(3, function()
+        if Flags.psxAutoJoin then pcall(PSX.join) end
+    end)
+end
+
+-- auto complete: fire each selected goal button on a slow tick
+local psxAcc = 0
+track(RunService.Heartbeat:Connect(function(dt)
+    if not Flags.psxAutoGoals then return end
+    local goals = Flags.psxGoals
+    if type(goals) ~= "table" or #goals == 0 then return end
+    psxAcc = psxAcc + dt
+    if psxAcc < 3 then return end
+    psxAcc = 0
+    for _, goal in ipairs(goals) do
+        pcall(PSX.openGoal, goal)
+    end
+end))
+
+Stops.Psx = function() Flags.psxAutoGoals = false end
 
 -- waypoints
 local CFG_DIR = "Tupachup"
@@ -2349,6 +2612,27 @@ if CAP.fpsCap then
     addSlider(opt, "FPS Cap", 30, 240, 60, 10, "fpsCap", function(v) Features.fpsCap(v) end)
 else
     addNote(opt, "setfpscap is missing on this executor - frame cap is off.", THEME.Red)
+end
+
+-- ---------- PSX ----------
+local psx = addTab("PSX", "◈")
+
+addSection(psx, "PSX Classic")
+addMultiSelect(psx, "Select Goals to Complete in PSX...",
+    { "Rewards", "Index", "Daily", "Quests", "Eggs", "Bank" },
+    {}, "psxGoals")
+
+addToggle(psx, "Auto Join PSX Classic", false, "psxAutoJoin", function(v) Features.psxAutoJoin(v) end)
+addToggle(psx, "Auto Complete Selected Goals", false, "psxAutoGoals")
+
+addButton(psx, "Join PSX Classic", THEME.Accent, function() Features.psxJoin() end)
+addButton(psx, "Open Classic Rewards", THEME.Text, function() Features.psxGoal("Rewards") end)
+addButton(psx, "Open Classic Index", THEME.Text, function() Features.psxGoal("Index") end)
+
+if CAP.firesignal then
+    addNote(psx, "Finds the on-screen PSX button by label and fires its click. Open the PSX menu first if a button is not found.", THEME.Sub)
+else
+    addNote(psx, "firesignal is missing on this executor - PSX buttons are off. Join still works if a PlaceId is set.", THEME.Red)
 end
 
 -- ---------- MISC ----------
