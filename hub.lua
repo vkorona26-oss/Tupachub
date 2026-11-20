@@ -2433,8 +2433,8 @@ local function addTab(name)
     tabIndex = tabIndex + 1
     local idx = tabIndex
     local btn = new("TextButton", {
-        Size = UDim2.new(1, -14, 0, 30),
-        Position = UDim2.fromOffset(7, 6 + (idx - 1) * 32),
+        Size = UDim2.new(1, -14, 0, 28),
+        Position = UDim2.fromOffset(7, 6 + (idx - 1) * 29),
         BackgroundColor3 = THEME.Row,
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
@@ -2444,8 +2444,8 @@ local function addTab(name)
     new("UICorner", { CornerRadius = UDim.new(0, 7) }, btn)
 
     local marker = new("Frame", {
-        Size = UDim2.fromOffset(2, 14),
-        Position = UDim2.fromOffset(0, 8),
+        Size = UDim2.fromOffset(2, 13),
+        Position = UDim2.fromOffset(0, 7),
         BackgroundColor3 = THEME.Accent,
         BorderSizePixel = 0,
         Visible = false,
@@ -2454,7 +2454,7 @@ local function addTab(name)
 
     local dot = new("Frame", {
         Size = UDim2.fromOffset(5, 5),
-        Position = UDim2.fromOffset(12, 12),
+        Position = UDim2.fromOffset(12, 11),
         BackgroundColor3 = THEME.Sub,
         BorderSizePixel = 0,
     }, btn)
