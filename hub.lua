@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.9.1"
+local VERSION = "2.0.0"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -3428,13 +3428,13 @@ addToggle(main, "Fly", false, "fly", function(v) Features.fly(v) end)
 addSlider(main, "Fly Speed", 10, 300, 50, 1, "flySpeed", function(v) Features.flySpeed(v) end)
 
 -- ---------- GAMES + AUTO FARM ----------
-local gamePage = addTab("Main", "🏡", 12)
+local gamePage = addTab("Main", "🏡", 13)
 -- the whole farm page lives in its own block: the compiler frees its locals at
 -- the end, and the main chunk is already near the 200-local ceiling.
 -- callSetter stays outside because the quest runner drives the same flags.
 local callSetter
 do
-local farmPage = addTab("Farm", "🖱️", 9)
+local farmPage = addTab("Farm", "🖱️", 10)
 
 function callSetter(flag, v)
     if Setters[flag] then pcall(Setters[flag], v) end
@@ -3530,7 +3530,7 @@ addNote(gamePage, "Detected: " .. DETECTED_NAME .. ". Every claim switch clicks 
 end
 
 -- ---------- PLAYER (visuals + teleport) ----------
-local vis = addTab("Player", "👤", 16)
+local vis = addTab("Player", "👤", 17)
 addSection(vis, "Players")
 addToggle(vis, "Player ESP", false, "esp", function(v) Features.esp(v) end)
 addToggle(vis, "ESP Names + Health", false, "espNames", function(v) Features.espNames(v) end)
@@ -4222,7 +4222,7 @@ end
 end
 -- ---------- QUEST ----------
 do
-local quest = addTab("Quest", "🏆", 11)
+local quest = addTab("Quest", "🏆", 12)
 
 addSection(quest, "Rank Quest")
 addSlider(quest, "Select Max Rank", 1, 40, 40, 1, "questMaxRank", nil, " Ranks")
@@ -4280,7 +4280,7 @@ addToggle(ev, "Auto Use Event Items", false, "autoEventUse")
 addNote(ev, "The event area is found the same way the quest runner finds an area: the game's own labelled button, highest unlocked number first.", THEME.Sub)
 
 -- ---------- FISHING WORLD ----------
-local fish = addTab("Fishing World", "🎣", 7)
+local fish = addTab("Fishing World", "🎣", 8)
 
 addSection(fish, "Travel")
 addButton(fish, "Travel To Fishing World", THEME.Accent, function()
@@ -4296,7 +4296,7 @@ addToggle(fish, "Auto Sell Fish", false, "autoSellFish")
 addNote(fish, "Cast and reel are separate switches: some games want the cast button only, some fire the reel automatically. Sell only clicks a button that also mentions fish.", THEME.Sub)
 
 -- ---------- FARMING WORLD ----------
-local farmw = addTab("Farming World", "🚜", 8)
+local farmw = addTab("Farming World", "🚜", 9)
 
 addSection(farmw, "Travel")
 addButton(farmw, "Travel To Farming World", THEME.Accent, function()
@@ -4313,7 +4313,7 @@ addToggle(farmw, "Auto Sell Crops", false, "autoSellCrop")
 addNote(farmw, "Plant, harvest and water run on their own timers, so a slow plot animation cannot block the next action. Sell only fires a button that names crops, farm or garden.", THEME.Sub)
 
 -- ---------- EGG ----------
-local egg = addTab("Egg", "🥚", 10)
+local egg = addTab("Egg", "🥚", 11)
 
 addSection(egg, "Hatching")
 addToggle(egg, "Auto Hatch Egg", false, "autoHatch")
@@ -4328,7 +4328,7 @@ addToggle(egg, "Auto Equip Best Pet", false, "autoEquipBest")
 addNote(egg, "The hatch switch clicks whatever the game labels Hatch / Open / Egg. Lower the delay only if your executor keeps up - 1 second is safe on mobile.", THEME.Sub)
 
 -- ---------- DAYCARE ----------
-local day = addTab("Daycare", "🏫", 13)
+local day = addTab("Daycare", "🏫", 14)
 
 addSection(day, "Daycare")
 addButton(day, "Travel To Daycare", THEME.Text, function()
@@ -4340,7 +4340,7 @@ addToggle(day, "Auto Collect Daycare", false, "autoDaycare")
 addNote(day, "Collect only fires a button that also mentions daycare or pet, so a generic Claim elsewhere on screen cannot take the click.", THEME.Sub)
 
 -- ---------- AUTOMATIC ----------
-local autoTab = addTab("Automatic", "🤖", 14)
+local autoTab = addTab("Automatic", "🤖", 15)
 
 addSection(autoTab, "One Switch")
 addToggle(autoTab, "Full Auto (Farm + Quest + Claims)", false, "autoFull", function(on)
@@ -4355,7 +4355,7 @@ addToggle(autoTab, "Auto Sell Everything", false, "autoSellAll")
 addNote(autoTab, "Full Auto is the three switches above it, wired together. Turning it off puts every tool back the way it was.", THEME.Sub)
 
 -- ---------- MINIGAMES ----------
-local mini = addTab("Minigames", "🎮", 15)
+local mini = addTab("Minigames", "🎮", 16)
 
 addSection(mini, "Minigames")
 addButton(mini, "Travel To Minigames", THEME.Accent, function()
@@ -4370,7 +4370,778 @@ end
 
 end
 -- ---------- MISC ----------
-local misc = addTab("Misc", "🎛️", 17)
+-- ============================================================
+-- PUMPKIN TYCOON  (ZapHub-shaped settings, one schema for UI and engine)
+-- ============================================================
+-- Settings is the source of truth. Every widget writes into it, the engine
+-- reads it once per tick, and _G.TupachupSettings always mirrors what is on
+-- screen. A ZapHub config pasted from another script is accepted verbatim:
+-- the keys and the value shapes are the same.
+local PT
+do
+PT = {
+    last = {},
+    seen = {},
+    thrown = {},
+    boostNote = nil,
+    statGui = nil,
+    white = nil,
+}
+
+local DEFAULTS = {
+    NewPetsTracker = { Enable = true, WebhookURL = "", PetTypes = { "Gargantuan", "Titanic", "Huge", "Exclusive" } },
+    NewPetsMailer = { Enable = true, Username = "", PetTypes = { "Gargantuan", "Titanic", "Huge", "Exclusive" } },
+    ClaimMailbox = { Enable = true },
+    Optimization = { Enable = true },
+    PumpkinTycoonMovement = { Mode = "Legit Walk" },
+    OptimizePumpkinTycoon = { Enable = true, Optimizations = { "Destroy Island Decoration", "Destroy Pumpkin Effects" } },
+    TeleportToBestPumpkinEggArea = { Enable = true },
+    BuyPumpkinTycoonButtons = { Enable = true },
+    BuyNearestPumpkinEgg = { Enable = true, MaximumPetsPerArea = 100, KeepLastEggLimit = true },
+    KeepPumpkins = { Enable = true, Rarity = "Mythical+" },
+    BreakPumpkins = { Enable = true },
+    BuyMerchantPumpkins = { Enable = true, Bands = { "Rare+ Pumpkin", "Epic+ Pumpkin", "Legendary+ Pumpkin", "Mythical+ Pumpkin", "Exotic+ Pumpkin" } },
+    PlantMerchantPumpkins = { Enable = true, MaximumSeconds = 5 },
+    BuyPumpkinUpgrades = { Enable = true, Upgrades = { "Spawn Luck", "Patch Coin Payout", "Pumpkin Damage", "Faster Spawns", "Merchant Stock", "Pumpkin Chase Odds", "Island Luck", "Merchant Luck" } },
+    BuyHotCocoaBoosts = { Enable = true, Boosts = { "Patch Coin Boost", "Pumpkin Damage Boost", "Island Luck Boost" }, MinimumMinutes = 15, OnlyWhenButtonsDone = true },
+    UsePumpkinBoosts = { Enable = true, Boosts = { "Patch Coin Boost", "Pumpkin Damage Boost", "Island Luck Boost" } },
+    OpenFlannelGifts = { Enable = true },
+    InfinitePetSpeed = { Enable = true },
+    Tap = { Enable = true, Mode = "Random" },
+    EfficientFarm = { Enable = true },
+    CollectOrbs = { Enable = true },
+    DisableEggAnimation = { Enable = true },
+    MakePetsGold = { Enable = false },
+    MakePetsRainbow = { Enable = false },
+    ClaimFreeGifts = { Enable = true },
+    ClaimDefaultForeverPackFreeGift = { Enable = true },
+    UseFruits = { Enable = true, Fruits = { "Apple", "Orange", "Banana", "Pineapple", "Watermelon", "Candycane", "Rainbow" }, Amount = 3, Type = "Normal" },
+    UseBuffs = { Enable = true, Buffs = { "Diamond Pencil", "Ultra Pet Token Boost", "Christmas Cookie", "Super Rng Chest Luck", "Squeaky Toy", "Ultra Adoption Token Boost", "Ultra Grinch-B-Gone", "Ultra Rng Chest V2 Luck", "Lucky Tile", "Ultra Lucky Tile", "Rng Chest V2 Luck", "Ultra Rng Chest Luck", "Mega Chest Empowered", "Grinch-B-Gone", "Super Rng Chest V2 Luck", "Adoption Token Boost", "Golden Pencil", "Nightmare Fuel", "Mega Rng Chest Luck", "Hot Cocoa", "Rng Chest Luck", "Glitched Drive", "Toy Ball", "Rainbow Pencil", "Pet Token Boost", "Toy Bone" } },
+    UsePotions = { Enable = true, Potions = { "Coins", "Lucky", "The Cocktail", "Huge", "Treasure Hunter", "Walkspeed", "Diamonds", "Damage" } },
+    EquipEnchants = { Enable = true, Enchants = { "Coins", "Criticals", "Strong Pets", "Tap Power", "Lucky Eggs" } },
+    Rejoin = { Enable = false, Time = 5 },
+    WhiteScreen = { Enable = false },
+    StatGUI = { Enable = true, Items = {
+        { Class = "Currency", Item = "Diamonds" },
+        { Class = "Currency", Item = "PumpkinTycoonCoins" },
+        { Class = "Currency", Item = "PumpkinTokens" },
+        { Class = "Lootbox", Item = "Flannel Gift" },
+    } },
+}
+
+local function copyTable(v)
+    if type(v) ~= "table" then return v end
+    local out = {}
+    for k, sub in pairs(v) do out[k] = copyTable(sub) end
+    return out
+end
+
+-- fills only what the incoming table is missing: a config that leaves a key
+-- out keeps the default instead of crashing the engine on a nil index
+local function mergeInto(dst, src)
+    for k, v in pairs(src or {}) do
+        if type(v) == "table" then
+            if type(dst[k]) ~= "table" then dst[k] = {} end
+            mergeInto(dst[k], v)
+        else
+            dst[k] = v
+        end
+    end
+    return dst
+end
+
+local Settings = copyTable(DEFAULTS)
+if type(_G.TupachupSettings) == "table" then mergeInto(Settings, _G.TupachupSettings) end
+if type(_G.ZapHubSettings) == "table" then mergeInto(Settings, _G.ZapHubSettings) end
+_G.TupachupSettings = Settings
+PT.settings = Settings
+
+-- dot path write, so a widget can say "BuyNearestPumpkinEgg.Enable" and stay
+-- one line without a table of closures per key
+local function setPath(path, value)
+    local node, parts = Settings, {}
+    for seg in tostring(path):gmatch("[^%.]+") do parts[#parts + 1] = seg end
+    if #parts == 0 then return end
+    for i = 1, #parts - 1 do
+        local seg = parts[i]
+        if type(node[seg]) ~= "table" then node[seg] = {} end
+        node = node[seg]
+    end
+    node[parts[#parts]] = value
+    _G.TupachupSettings = Settings
+    return value
+end
+PT.setPath = setPath
+PT.cfg = function(key) return Settings[key] or {} end
+
+-- throttle shared by every PT feature: key -> minimum seconds between runs
+local function gate(key, seconds)
+    local now = os.clock()
+    local last = PT.last[key]
+    if last and (now - last) < seconds then return false end
+    PT.last[key] = now
+    return true
+end
+PT.gate = gate
+
+
+
+-- ============================================================
+-- MOVEMENT  ("Teleport" or "Legit Walk", used by every event feature)
+-- ============================================================
+local function travelTo(target, done)
+    if not target then return false end
+    local _, hum = char()
+    local hrp = root()
+    if not (hrp and hum) then return false end
+    local dest = target.Position or target
+    local mode = (PT.cfg("PumpkinTycoonMovement").Mode or "Legit Walk")
+
+    if mode == "Teleport" then
+        hrp.CFrame = CFrame.new(dest + Vector3.new(0, 4, 0))
+        if done then task.spawn(done) end
+        return true
+    end
+
+    task.spawn(function()
+        local tries = 0
+        while tries < 120 do
+            tries = tries + 1
+            local _, h = char()
+            local r = root()
+            if not (h and r) or not r.Parent then break end
+            local flat = Vector3.new(dest.X, r.Position.Y, dest.Z)
+            if (r.Position - flat).Magnitude < 6 then break end
+            h:MoveTo(flat)
+            task.wait(0.1)
+        end
+        if done then pcall(done) end
+    end)
+    return true
+end
+PT.travelTo = travelTo
+
+-- ============================================================
+-- FINDERS  (labels and parts, never a guessed remote)
+-- ============================================================
+local function clickWords(words, key, seconds, avoid, context)
+    return Auto.use(words, "pt" .. key, seconds, avoid, context)
+end
+PT.clickWords = clickWords
+
+local function findPart(words, avoid)
+    local best, bestDist = nil, nil
+    local hrp = root()
+    local origin = hrp and hrp.Position or Vector3.zero
+    local scanned = 0
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        scanned = scanned + 1
+        if scanned > 14000 then break end
+        if obj:IsA("BasePart") then
+            local low = string.lower(obj.Name)
+            local hit = false
+            for _, w in ipairs(words) do
+                if string.find(low, w, 1, true) then hit = true break end
+            end
+            if hit then
+                local bad = false
+                for _, w in ipairs(avoid or {}) do
+                    if string.find(low, w, 1, true) then bad = true break end
+                end
+                if not bad then
+                    local d = (obj.Position - origin).Magnitude
+                    if not bestDist or d < bestDist then best, bestDist = obj, d end
+                end
+            end
+        end
+    end
+    return best
+end
+PT.findPart = findPart
+
+-- a proximity prompt is the only click a lot of event objects accept
+local function promptPart(part)
+    if not part then return false end
+    local prompt = part:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if not prompt then
+        local model = part.Parent
+        if model then prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true) end
+    end
+    if not prompt then return false end
+    if type(fireproximityprompt) == "function" then
+        local ok = pcall(fireproximityprompt, prompt)
+        if ok then return true end
+    end
+    pcall(function() prompt:InputHoldBegin() end)
+    return true
+end
+PT.promptPart = promptPart
+
+-- ============================================================
+-- NEW PETS  (tracker + mailer share one scan)
+-- ============================================================
+local PET_TAG = { "pet", "huge", "titanic", "gargantuan", "exclusive" }
+
+local function petTypeOf(name)
+    local low = string.lower(name)
+    local tagged = false
+    for _, tag in ipairs(PET_TAG) do
+        if string.find(low, tag, 1, true) then tagged = true break end
+    end
+    if not tagged then return nil end
+    local types = PT.cfg("NewPetsTracker").PetTypes or {}
+    for _, t in ipairs(types) do
+        if string.find(low, string.lower(t), 1, true) then return t end
+    end
+    return nil
+end
+
+local function post(url, body)
+    if url == nil or url == "" then return false end
+    local payload = HttpService:JSONEncode(body)
+    if type(request) == "function" then
+        local ok = pcall(request, { Url = url, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = payload })
+        return ok
+    end
+    if type(syn) == "table" and type(syn.request) == "function" then
+        local ok = pcall(syn.request, { Url = url, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = payload })
+        return ok
+    end
+    return false
+end
+
+local function scanPets()
+    local found = {}
+    local scanned = 0
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        scanned = scanned + 1
+        if scanned > 16000 then break end
+        if obj:IsA("Model") or obj:IsA("Tool") then
+            local kind = petTypeOf(obj.Name)
+            if kind then
+                -- GetDebugId separates two pets with the same name
+                local ident
+                if type(obj.GetDebugId) == "function" then
+                    local okId, id = pcall(obj.GetDebugId, obj)
+                    if okId and id then ident = tostring(id) end
+                end
+                local key = obj.Name .. "#" .. (ident or obj.Name)
+                if not PT.seen[key] then
+                    PT.seen[key] = os.clock()
+                    found[#found + 1] = { name = obj.Name, kind = kind, inst = obj }
+                end
+            end
+        end
+    end
+    -- forget pets that vanished, so a re-summon counts again
+    for key, at in pairs(PT.seen) do
+        if os.clock() - at > 180 then PT.seen[key] = nil end
+    end
+    return found
+end
+
+local function reportPets(hits)
+    if #hits == 0 then return end
+    local tracker, mailer = PT.cfg("NewPetsTracker"), PT.cfg("NewPetsMailer")
+
+    if tracker.Enable then
+        for _, hit in ipairs(hits) do
+            notify(hit.kind .. ": " .. hit.name, "success", "New pet")
+            post(tracker.WebhookURL, {
+                username = "Tupachup",
+                content = "**New " .. hit.kind .. "** `" .. hit.name .. "` in " .. tostring(game.Name),
+            })
+        end
+    end
+
+    if mailer.Enable then
+        local who = mailer.Username ~= "" and ("@" .. mailer.Username .. " ") or ""
+        for _, hit in ipairs(hits) do
+            notify(who .. hit.kind .. ": " .. hit.name, "info", "Mailer")
+        end
+    end
+end
+
+-- ============================================================
+-- STAT GUI  (reads the numbers the game already draws)
+-- ============================================================
+local function readStat(item)
+    local want = string.lower(item)
+    local value
+    eachGameGui(function(inst)
+        if inst:IsA("TextLabel") and isShown(inst) then
+            local text = string.lower(inst.Text or "")
+            if string.find(text, want, 1, true) then
+                local num = string.match(inst.Text, "[%d,]+")
+                if num then value = num return false end
+            end
+            local parent = inst.Parent
+            if parent and string.find(string.lower(parent.Name), want, 1, true) then
+                local num = string.match(inst.Text or "", "[%d,]+")
+                if num and #num > 0 then value = num return false end
+            end
+        end
+        return nil
+    end)
+    return value
+end
+PT.readStat = readStat
+
+local function buildStatGui()
+    if PT.statGui then return end
+    local holder = new("ScreenGui", {
+        Name = "TupachupStats",
+        ResetOnSpawn = false,
+        IgnoreGuiInset = true,
+        DisplayOrder = 480,
+    }, PG)
+    PT.statGui = holder
+
+    local box = new("Frame", {
+        Size = UDim2.fromOffset(186, 26),
+        Position = UDim2.new(0, 12, 0, 12),
+        BackgroundColor3 = THEME.Panel,
+        BorderSizePixel = 0,
+    }, holder)
+    new("UICorner", { CornerRadius = UDim.new(0, 8) }, box)
+    new("UIStroke", { Color = THEME.Accent, Thickness = 1, Transparency = 0.6 }, box)
+
+    local row = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 26),
+        BackgroundTransparency = 1,
+    }, box)
+    local rows = {}
+    PT.statRows = rows
+    for i, entry in ipairs((PT.cfg("StatGUI").Items) or {}) do
+        local cell
+        if i == 1 then
+            cell = new("Frame", { Size = UDim2.new(1, -8, 0, 26), Position = UDim2.fromOffset(4, 0), BackgroundTransparency = 1 }, row)
+        else
+            cell = new("Frame", {
+                Size = UDim2.new(1, -8, 0, 22),
+                Position = UDim2.fromOffset(4, 26 + (i - 2) * 22),
+                BackgroundTransparency = 1,
+            }, box)
+        end
+        rows[i] = new("TextLabel", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundTransparency = 1,
+            Text = entry.Item .. ": ...",
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Font = Enum.Font.GothamBold,
+            TextSize = 11,
+            TextColor3 = i == 1 and THEME.Accent or THEME.Text,
+        }, cell)
+    end
+
+    box.Size = UDim2.fromOffset(186, 26 + math.max(0, #rows - 1) * 22)
+end
+
+local function updateStatGui()
+    if not PT.statGui then return end
+    local items = (PT.cfg("StatGUI").Items) or {}
+    for i, entry in ipairs(items) do
+        local label = PT.statRows and PT.statRows[i]
+        if label then
+            label.Text = entry.Item .. ": " .. (readStat(entry.Item) or "-")
+        end
+    end
+end
+
+-- ============================================================
+-- TICK  (one pass, reads Settings, calls each feature)
+-- ============================================================
+local RARITY = { ["Off"] = 0, ["Rare+"] = 1, ["Epic+"] = 2, ["Legendary+"] = 3, ["Mythical+"] = 4, ["Exotic+"] = 5, ["Divine+"] = 6, ["Secret+"] = 7 }
+
+local function rarityAtLeast(name, want)
+    local floor = RARITY[want] or 0
+    if floor == 0 then return false end
+    local order = { "rare", "epic", "legendary", "mythical", "exotic", "divine", "secret" }
+    local low = string.lower(name or "")
+    for i, word in ipairs(order) do
+        if string.find(low, word, 1, true) then return i >= floor end
+    end
+    return false
+end
+PT.rarityAtLeast = rarityAtLeast
+
+function PT.tick(dt)
+    local s = Settings
+
+    -- pets: tracker and mailer share one scan
+    if (s.NewPetsTracker.Enable or s.NewPetsMailer.Enable) and gate("pets", 2) then
+        pcall(function() reportPets(scanPets()) end)
+    end
+
+    if s.ClaimMailbox.Enable and gate("mail", 4) then
+        clickWords({ "claim all", "collect all", "claim", "collect" }, "mail", 4)
+    end
+
+    if s.Optimization.Enable and gate("optim", 20) then
+        pcall(function() Features.lowGraphics(true) end)
+    end
+
+    if s.TeleportToBestPumpkinEggArea.Enable and gate("bestarea", 6) then
+        local ok = pcall(Quest.travel, false, Quest.areaWords, "area")
+        if not ok then clickWords({ "area" }, "bestarea", 6) end
+    end
+
+    if s.BuyPumpkinTycoonButtons.Enable and gate("buybuttons", 3) then
+        local clicked = clickWords({ "buy", "unlock", "purchase" }, "buybuttons", 3)
+        -- nothing left to buy for a full minute means the buttons are done,
+        -- which is the gate BuyHotCocoaBoosts waits on
+        if clicked then
+            PT.buttonsDone, PT.buttonsIdle = true, 0
+        else
+            PT.buttonsIdle = (PT.buttonsIdle or 0) + 1
+            if PT.buttonsIdle > 20 then PT.buttonsDone = true end
+        end
+    end
+
+    if s.BuyNearestPumpkinEgg.Enable and gate("egg", 2) then
+        clickWords({ "egg", "hatch", "open" }, "egg", 2)
+    end
+
+    -- the kept pumpkin is whichever one clears the rarity bar. BreakPumpkins
+    -- reads the same test and skips it, so a rare pumpkin is never touched.
+
+    if s.BreakPumpkins.Enable and gate("break", 1.2) then
+        local part = findPart({ "pumpkin" }, { "seed", "shop", "icon" })
+        if part then
+            local keep = s.KeepPumpkins.Enable and rarityAtLeast(part.Name, s.KeepPumpkins.Rarity)
+            if not keep then pcall(promptPart, part) end
+        end
+    end
+
+    if s.BuyMerchantPumpkins.Enable and gate("merchant", 4) then
+        local bands = s.BuyMerchantPumpkins.Bands or {}
+        for _, band in ipairs(bands) do
+            local words = {}
+            for w in string.gmatch(string.lower(band), "%a+") do words[#words + 1] = w end
+            if #words > 0 then
+                if clickWords(words, "merchant_" .. band, 4, nil, { "merchant" }) then break end
+            end
+        end
+    end
+
+    if s.PlantMerchantPumpkins.Enable and gate("plant", 3) then
+        clickWords({ "plant" }, "plant", 3, nil, { "pedestal", "stand", "merchant" })
+    end
+
+    if s.BuyPumpkinUpgrades.Enable and gate("upgrade", 5) then
+        for _, name in ipairs(s.BuyPumpkinUpgrades.Upgrades or {}) do
+            local words = {}
+            for w in string.gmatch(string.lower(name), "%a+") do words[#words + 1] = w end
+            if #words > 1 then
+                if clickWords(words, "upgrade_" .. name, 5) then break end
+            end
+        end
+    end
+
+    if s.BuyHotCocoaBoosts.Enable and gate("cocoa", 6) then
+        local cfg = s.BuyHotCocoaBoosts
+        local okToGo = true
+        if cfg.OnlyWhenButtonsDone then
+            okToGo = PT.buttonsDone == true
+        end
+        if okToGo then
+            for _, name in ipairs(cfg.Boosts or {}) do
+                local words = {}
+                for w in string.gmatch(string.lower(name), "%a+") do words[#words + 1] = w end
+                if #words > 1 and clickWords(words, "cocoa_" .. name, 6) then break end
+            end
+        end
+    end
+
+    if s.UsePumpkinBoosts.Enable and gate("useboost", 8) then
+        for _, name in ipairs(s.UsePumpkinBoosts.Boosts or {}) do
+            local words = {}
+            for w in string.gmatch(string.lower(name), "%a+") do words[#words + 1] = w end
+            if #words > 1 then clickWords(words, "useboost_" .. name, 8, { "buy" }) end
+        end
+    end
+
+    if s.OpenFlannelGifts.Enable and gate("flannel", 5) then
+        clickWords({ "flannel", "gift" }, "flannel", 5, { "send" })
+    end
+
+    if s.ClaimFreeGifts.Enable and gate("freegift", 6) then
+        clickWords({ "free gift", "freebie", "claim" }, "freegift", 6, { "rank" })
+    end
+
+    if s.ClaimDefaultForeverPackFreeGift.Enable and gate("forever", 8) then
+        clickWords({ "forever", "free gift" }, "forever", 8)
+    end
+
+    if s.DisableEggAnimation.Enable and gate("eggskip", 2) then
+        clickWords({ "skip", "fast hatch", "disable animation" }, "eggskip", 2)
+    end
+
+    if s.MakePetsGold.Enable and gate("gold", 5) then
+        clickWords({ "gold" }, "gold", 5)
+    end
+    if s.MakePetsRainbow.Enable and gate("rainbow", 5) then
+        clickWords({ "rainbow" }, "rainbow", 5)
+    end
+
+    -- consumables: open the bag once, then click the named items
+    local bags = {
+        { "UseFruits", "Fruits", "fruit" },
+        { "UseBuffs", "Buffs", "buff" },
+        { "UsePotions", "Potions", "potion" },
+        { "EquipEnchants", "Enchants", "enchant" },
+    }
+    for _, bag in ipairs(bags) do
+        local cfg = s[bag[1]]
+        if cfg and cfg.Enable and #(cfg[bag[2]] or {}) > 0 and gate("bag_" .. bag[3], 6) then
+            local opened = clickWords({ bag[3], "inventory", "bag" }, "open_" .. bag[3], 6)
+            if opened then
+                local items = cfg[bag[2]]
+                for _, name in ipairs(items) do
+                    clickWords({ string.lower(name) }, "use_" .. bag[3] .. "_" .. name, 6)
+                end
+            end
+        end
+    end
+
+    -- interface
+    if s.StatGUI.Enable then
+        if not PT.statGui then buildStatGui() end
+        if gate("stats", 1) then updateStatGui() end
+    elseif PT.statGui then
+        PT.statGui:Destroy()
+        PT.statGui, PT.statRows = nil, nil
+    end
+
+    if s.WhiteScreen.Enable then
+        if not PT.white then
+            PT.white = new("ScreenGui", { Name = "TupachupWhite", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 470 }, PG)
+            new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, PT.white)
+        end
+    elseif PT.white then
+        PT.white:Destroy()
+        PT.white = nil
+    end
+
+    if s.Rejoin.Enable and gate("rejoin", 1) then
+        PT.rejoinAt = PT.rejoinAt or (os.clock() + (s.Rejoin.Time or 5) * 60)
+        if os.clock() >= PT.rejoinAt then
+            PT.rejoinAt = nil
+            pcall(Features.rejoin)
+        end
+    else
+        PT.rejoinAt = nil
+    end
+end
+
+-- OptimizePumpkinTycoon is a one-shot sweep, not a tick job: decorations and
+-- effects go away and stay away.
+function PT.optimizePumpkinTycoon()
+    local cfg = PT.cfg("OptimizePumpkinTycoon")
+    if not cfg.Enable then return 0 end
+    local removed, scanned = 0, 0
+    local words = { "decoration", "islanddeco", "pumpkineffect", "particle", "smoke", "sparkle" }
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        scanned = scanned + 1
+        if scanned > 14000 then break end
+        local low = string.lower(obj.Name)
+        for _, w in ipairs(words) do
+            if string.find(low, w, 1, true) then
+                if obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail") or obj:IsA("Fire") or obj:IsA("Smoke") then
+                    obj.Enabled = false
+                    removed = removed + 1
+                elseif obj:IsA("BasePart") and string.find(low, "deco", 1, true) then
+                    obj.Transparency = 1
+                    removed = removed + 1
+                end
+                break
+            end
+        end
+    end
+    return removed
+end
+
+-- ============================================================
+-- UI  (one control per settings key)
+-- ============================================================
+local pt = addTab("Pumpkin Tycoon", "🎃", 7)
+
+local function bindToggle(key, label, flag, default)
+    local cfg = Settings[key]
+    addToggle(pt, label, cfg.Enable == true, flag, function(v)
+        setPath(key .. ".Enable", v)
+    end)
+end
+
+addSection(pt, "Auto Farm")
+bindToggle("InfinitePetSpeed", "Infinite Pet Speed", "ptInfinitePetSpeed")
+addDropdown(pt, "Auto Tap Mode", function() return { "Random", "Center", "Edges" } end, Settings.Tap.Mode or "Random", "ptTapMode", function(v)
+    setPath("Tap.Mode", v)
+end)
+bindToggle("Tap", "Auto Tap", "ptTap")
+bindToggle("EfficientFarm", "Efficient Farm", "ptEfficient")
+bindToggle("CollectOrbs", "Collect Orbs", "ptOrbs")
+
+addSection(pt, "Eggs")
+bindToggle("DisableEggAnimation", "Disable Egg Animation", "ptEggAnim")
+bindToggle("BuyNearestPumpkinEgg", "Buy Nearest Egg", "ptBuyEgg")
+addSlider(pt, "Max Pets Per Area", 1, 100, Settings.BuyNearestPumpkinEgg.MaximumPetsPerArea or 100, 1, "ptMaxPets", function(v)
+    setPath("BuyNearestPumpkinEgg.MaximumPetsPerArea", v)
+end)
+addToggle(pt, "Keep Last Egg Limit", Settings.BuyNearestPumpkinEgg.KeepLastEggLimit == true, "ptKeepLimit", function(v)
+    setPath("BuyNearestPumpkinEgg.KeepLastEggLimit", v)
+end)
+bindToggle("BuyPumpkinTycoonButtons", "Buy Area Buttons", "ptBuyButtons")
+bindToggle("TeleportToBestPumpkinEggArea", "Teleport To Best Area", "ptBestArea")
+addDropdown(pt, "Movement Mode", function() return { "Legit Walk", "Teleport" } end, Settings.PumpkinTycoonMovement.Mode or "Legit Walk", "ptMoveMode", function(v)
+    setPath("PumpkinTycoonMovement.Mode", v)
+end)
+
+addSection(pt, "Pumpkins")
+bindToggle("KeepPumpkins", "Keep Pumpkins", "ptKeep")
+addDropdown(pt, "Keep Rarity", function()
+    return { "Off", "Rare+", "Epic+", "Legendary+", "Mythical+", "Exotic+", "Divine+", "Secret+" }
+end, Settings.KeepPumpkins.Rarity or "Mythical+", "ptKeepRarity", function(v)
+    setPath("KeepPumpkins.Rarity", v)
+end)
+bindToggle("BreakPumpkins", "Break Pumpkins", "ptBreak")
+
+addSection(pt, "Merchant")
+bindToggle("BuyMerchantPumpkins", "Buy Merchant Pumpkins", "ptMerchant")
+addMultiSelect(pt, "Merchant Bands", {
+    "Rare+ Pumpkin", "Epic+ Pumpkin", "Legendary+ Pumpkin", "Mythical+ Pumpkin", "Exotic+ Pumpkin",
+}, Settings.BuyMerchantPumpkins.Bands, "ptMerchantBands", function(list)
+    setPath("BuyMerchantPumpkins.Bands", list)
+end)
+bindToggle("PlantMerchantPumpkins", "Plant On Pedestal", "ptPlant")
+addSlider(pt, "Pedestal Freshness", 1, 60, Settings.PlantMerchantPumpkins.MaximumSeconds or 5, 1, "ptPlantSecs", function(v)
+    setPath("PlantMerchantPumpkins.MaximumSeconds", v)
+end, " s")
+
+addSection(pt, "Upgrades")
+bindToggle("BuyPumpkinUpgrades", "Buy Upgrades", "ptUpgrades")
+addMultiSelect(pt, "Upgrade List", {
+    "Spawn Luck", "Patch Coin Payout", "Pumpkin Damage", "Faster Spawns",
+    "Merchant Stock", "Pumpkin Chase Odds", "Island Luck", "Merchant Luck",
+}, Settings.BuyPumpkinUpgrades.Upgrades, "ptUpgradeList", function(list)
+    setPath("BuyPumpkinUpgrades.Upgrades", list)
+end)
+
+addSection(pt, "Boosts")
+bindToggle("BuyHotCocoaBoosts", "Buy Hot Cocoa Boosts", "ptCocoa")
+addMultiSelect(pt, "Cocoa Boosts", {
+    "Patch Coin Boost", "Pumpkin Damage Boost", "Island Luck Boost",
+}, Settings.BuyHotCocoaBoosts.Boosts, "ptCocoaList", function(list)
+    setPath("BuyHotCocoaBoosts.Boosts", list)
+end)
+addSlider(pt, "Minimum Minutes", 1, 720, Settings.BuyHotCocoaBoosts.MinimumMinutes or 15, 1, "ptCocoaMins", function(v)
+    setPath("BuyHotCocoaBoosts.MinimumMinutes", v)
+end, " min")
+addToggle(pt, "Only When Buttons Done", Settings.BuyHotCocoaBoosts.OnlyWhenButtonsDone == true, "ptCocoaGate", function(v)
+    setPath("BuyHotCocoaBoosts.OnlyWhenButtonsDone", v)
+end)
+bindToggle("UsePumpkinBoosts", "Use Boosts", "ptUseBoost")
+
+addSection(pt, "Gifts")
+bindToggle("OpenFlannelGifts", "Open Flannel Gifts", "ptFlannel")
+
+addSection(pt, "Pets")
+addToggle(pt, "Make Pets Gold", Settings.MakePetsGold.Enable == true, "ptGold", function(v) setPath("MakePetsGold.Enable", v) end)
+addToggle(pt, "Make Pets Rainbow", Settings.MakePetsRainbow.Enable == true, "ptRainbow", function(v) setPath("MakePetsRainbow.Enable", v) end)
+
+addSection(pt, "Consumables")
+bindToggle("UseFruits", "Use Fruits", "ptFruits")
+addMultiSelect(pt, "Fruit List", {
+    "Apple", "Orange", "Banana", "Pineapple", "Watermelon", "Candycane", "Rainbow",
+}, Settings.UseFruits.Fruits, "ptFruitList", function(list) setPath("UseFruits.Fruits", list) end)
+addDropdown(pt, "Fruit Type", function() return { "Normal", "Golden", "Rainbow" } end, Settings.UseFruits.Type or "Normal", "ptFruitType", function(v)
+    setPath("UseFruits.Type", v)
+end)
+bindToggle("UseBuffs", "Use Buffs", "ptBuffs")
+addMultiSelect(pt, "Buff List", Settings.UseBuffs.Buffs, Settings.UseBuffs.Buffs, "ptBuffList", function(list) setPath("UseBuffs.Buffs", list) end)
+bindToggle("UsePotions", "Use Potions", "ptPotions")
+addMultiSelect(pt, "Potion List", Settings.UsePotions.Potions, Settings.UsePotions.Potions, "ptPotionList", function(list) setPath("UsePotions.Potions", list) end)
+bindToggle("EquipEnchants", "Equip Enchants", "ptEnchants")
+addMultiSelect(pt, "Enchant List", Settings.EquipEnchants.Enchants, Settings.EquipEnchants.Enchants, "ptEnchantList", function(list) setPath("EquipEnchants.Enchants", list) end)
+
+addSection(pt, "Webhook")
+addTextbox(pt, "Tracker Webhook", "https://discord.com/api/webhooks/...", "ptWebhook", function(text)
+    setPath("NewPetsTracker.WebhookURL", text)
+end)
+addTextbox(pt, "Mailer Username", "your discord name", "ptMailerName", function(text)
+    setPath("NewPetsMailer.Username", text)
+end)
+addToggle(pt, "New Pets Tracker", Settings.NewPetsTracker.Enable == true, "ptTracker", function(v) setPath("NewPetsTracker.Enable", v) end)
+addToggle(pt, "New Pets Mailer", Settings.NewPetsMailer.Enable == true, "ptMailer", function(v) setPath("NewPetsMailer.Enable", v) end)
+
+addSection(pt, "Interface")
+bindToggle("Optimization", "Optimization", "ptOptim")
+addToggle(pt, "Optimize Pumpkin Tycoon", Settings.OptimizePumpkinTycoon.Enable == true, "ptPT", function(v)
+    setPath("OptimizePumpkinTycoon.Enable", v)
+    if v then
+        local n = PT.optimizePumpkinTycoon()
+        notify(n .. " decorations and effects cleared", "success", "Pumpkin Tycoon")
+    end
+end)
+addToggle(pt, "Stat GUI", Settings.StatGUI.Enable == true, "ptStats", function(v) setPath("StatGUI.Enable", v) end)
+addToggle(pt, "White Screen", Settings.WhiteScreen.Enable == true, "ptWhite", function(v) setPath("WhiteScreen.Enable", v) end)
+addToggle(pt, "Auto Rejoin", Settings.Rejoin.Enable == true, "ptRejoin", function(v) setPath("Rejoin.Enable", v) end)
+addSlider(pt, "Rejoin Minutes", 1, 720, Settings.Rejoin.Time or 5, 1, "ptRejoinMin", function(v)
+    setPath("Rejoin.Time", v)
+end, " min")
+
+addSection(pt, "Settings")
+addButton(pt, "Export Settings", THEME.Accent, function()
+    local body = HttpService:JSONEncode(Settings)
+    if copy(body) then
+        notify("Settings copied as JSON", "success", "Pumpkin Tycoon")
+    else
+        notify("No clipboard on this executor", "error")
+    end
+end)
+addButton(pt, "Print Settings", THEME.Text, function()
+    print("[TUPACHUP SETTINGS] " .. HttpService:JSONEncode(Settings))
+    notify("Settings printed to console", "info")
+end)
+
+-- paste a ZapHub config straight in: the shapes are the same, so a merge is
+-- enough and anything missing keeps its default
+local pasteBox = addTextbox(pt, "Paste ZapHub Config", "_G.ZapHubSettings = {...}", "ptPaste")
+addButton(pt, "Import Config", THEME.Green, function()
+    local raw = pasteBox.Text or ""
+    local body = raw:match("ZapHubSettings%s*=%s*(%b{})") or raw:match("TupachupSettings%s*=%s*(%b{})") or raw
+    if type(loadstring) ~= "function" then
+        notify("This executor has no loadstring", "error")
+        return
+    end
+    local chunk = loadstring("return " .. body)
+    if not chunk then notify("Could not parse that table", "error") return end
+    local ok, parsed = pcall(chunk)
+    if not ok or type(parsed) ~= "table" then
+        notify("That is not a settings table", "error")
+        return
+    end
+    mergeInto(Settings, parsed)
+    _G.TupachupSettings = Settings
+    for flag, setter in pairs(Setters) do
+        if Flags[flag] ~= nil then pcall(setter, Flags[flag]) end
+    end
+    notify("Config imported and applied", "success", "Pumpkin Tycoon")
+end)
+
+flush(pt)
+
+-- the tick: one heartbeat, every feature reads Settings
+local ptAcc = 0
+track(RunService.Heartbeat:Connect(function(dt)
+    ptAcc = ptAcc + (dt or 0)
+    if ptAcc < 0.2 then return end
+    ptAcc = 0
+    pcall(PT.tick, dt)
+end))
+end
+
+local misc = addTab("Misc", "🎛️", 18)
 
 addSection(misc, "Protection")
 addToggle(misc, "Anti-Kick", false, "antiKick", function(v) Features.antiKick(v) end)
@@ -4730,6 +5501,7 @@ getgenv().Tupachup = {
     Auto = Auto,
     SelfTest = selfTestReport,
     PSX = PSX,
+    PT = PT,
     CallSetter = callSetter,
     Pages = pages,
     Setters = Setters,
