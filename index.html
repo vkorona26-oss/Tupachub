@@ -73,13 +73,13 @@
       <pre><code id="script-line">loadstring(game:HttpGet("https://vkorona26-oss.github.io/Tupachub/Exec"))()</code></pre>
     </div>
 
-    <p class="fine">Paste it into your executor and run it in Pet Simulator 99. Works on PC and mobile, executor level 3 and up.</p>
+    <p class="fine">Paste it into your executor and run it in Pet Simulator 99. Works on PC and mobile, executor level 3 and up. <b>Pumpkin Tycoon</b> and <b>Webhook</b> are premium &mdash; put <code>script_key = &quot;YOUR-KEY&quot;;</code> on the line above the loader, or paste the key into the lock panel inside the hub. It saves after the first time.</p>
 
     <div class="stats">
       <div><b>4</b><span>games</span></div>
       <div><b>18</b><span>tabs</span></div>
-      <div><b>192 KB</b><span>payload</span></div>
-      <div><b>v2.0.0</b><span>live</span></div>
+      <div><b>203 KB</b><span>payload</span></div>
+      <div><b>v2.1.0</b><span>live</span></div>
     </div>
   </section>
 
@@ -113,6 +113,11 @@
     <p class="eyebrow">Updates</p>
     <h2>Shipping notes.</h2>
     <ol class="timeline">
+      <li>
+        <div class="meta"><span class="ver">v2.1.0</span><time>2026-11-21</time></div>
+        <h3>Premium key system</h3>
+        <p>Two tabs are now premium: <b>Pumpkin Tycoon</b> and <b>Webhook</b>. They start covered by a lock panel with a key box. Paste a key, hit Activate, and the covers come off for the session. The key is saved to <code>Tupachup/premium.json</code> and re-read on the next run, so it is entered once. Keys are checked as SHA-256 hashes against an allowlist baked into the script — the file never contains a working key, only its hash. Expiry is read from the key payload, so a 30-day key stops working on day 31 without a script update. <code>script_key</code> and <code>getgenv().TupachupKey</code> are both read on boot, so a one-liner with the key set above it works exactly like ZapHub's.</p>
+      </li>
       <li>
         <div class="meta"><span class="ver">v2.0.0</span><time>2026-11-21</time></div>
         <h3>Pumpkin Tycoon tab, ZapHub settings schema</h3>
