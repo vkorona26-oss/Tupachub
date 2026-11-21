@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.8.1"
+local VERSION = "1.9.0"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -147,16 +147,29 @@ local function new(class, props, parent)
     return inst
 end
 
+-- A freshly joined client has no Character for a second or two, and a respawn
+-- swaps it mid-click. Reading LP.Character alone made every toggle a no-op in
+-- that window, which reads as "the hub does nothing". The workspace fallback
+-- covers executors that report Character late.
 local function char()
     local c = LP.Character
+    if not c then
+        local found = workspace:FindFirstChild(LP.Name)
+        if found then c = found end
+    end
     if not c then return nil end
     local hum = c:FindFirstChildOfClass("Humanoid")
+    if not hum then
+        local alt = c:FindFirstChildWhichIsA("Humanoid", true)
+        if alt then hum = alt end
+    end
     if not hum then return nil end
     return c, hum
 end
 
 local function root()
     local c = LP.Character
+    if not c then c = workspace:FindFirstChild(LP.Name) end
     return c and c:FindFirstChild("HumanoidRootPart")
 end
 
@@ -620,6 +633,20 @@ local function rowBase(page, h)
     return row
 end
 
+-- A callback that throws used to die inside a spawned thread: the switch moved,
+-- the feature did nothing, and the hub took the blame in silence. Every widget
+-- callback runs through here now, and a failure prints itself on screen.
+local function runCb(label, cb, ...)
+    if not cb then return end
+    local ok, err = pcall(cb, ...)
+    if not ok then
+        local msg = tostring(err)
+        warn("[Tupachup] " .. label .. ": " .. msg)
+        pcall(notify, label .. ": " .. msg, "error", "Feature error")
+    end
+    return ok, err
+end
+
 local function addToggle(page, label, default, flag, cb)
     local row = rowBase(page, 32)
     new("TextLabel", {
@@ -664,7 +691,7 @@ local function addToggle(page, label, default, flag, cb)
         state = v and true or false
         Flags[flag] = state
         render(state)
-        if not silent and cb then task.spawn(cb, state) end
+        if not silent and cb then task.spawn(runCb, label, cb, state) end
     end
 
     local hit = new("TextButton", {
@@ -727,6 +754,16 @@ local function addSlider(page, label, lo, hi, default, step, flag, cb, suffix)
     }, bar)
     new("UICorner", { CornerRadius = UDim.new(1, 0) }, knob)
 
+    -- a 5px frame is a hard target, and on a phone it is a miss. The whole bar
+    -- band is a button now; the track and knob stay underneath it.
+    local grab = new("TextButton", {
+        Size = UDim2.new(1, -20, 0, 18),
+        Position = UDim2.fromOffset(10, 22),
+        BackgroundTransparency = 1,
+        Text = "",
+        ZIndex = 3,
+    }, row)
+
     local value = default
     local dragging = false
 
@@ -737,7 +774,7 @@ local function addSlider(page, label, lo, hi, default, step, flag, cb, suffix)
         knob.Position = UDim2.new(alpha, 0, 0.5, 0)
         valueLbl.Text = tostring(value) .. (suffix or "")
         Flags[flag] = value
-        if not silent and cb then task.spawn(cb, value) end
+        if not silent and cb then task.spawn(runCb, label, cb, value) end
     end
 
     local function fromX(x)
@@ -745,24 +782,28 @@ local function addSlider(page, label, lo, hi, default, step, flag, cb, suffix)
         apply(lo + (hi - lo) * clamp(alpha, 0, 1), false)
     end
 
-    track(bar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    track(grab.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             fromX(input.Position.X)
         end
     end))
-    track(bar.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    track(grab.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end))
     track(UIS.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
             fromX(input.Position.X)
         end
     end))
     track(UIS.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end))
@@ -791,7 +832,7 @@ local function addButton(page, label, color, cb)
     b.MouseLeave:Connect(function()
         TweenService:Create(b, TweenInfo.new(0.12), { BackgroundColor3 = THEME.Row }):Play()
     end)
-    b.MouseButton1Click:Connect(cb)
+    b.MouseButton1Click:Connect(function() runCb(label, cb) end)
     page.y = page.y + 38
     return b
 end
@@ -878,7 +919,7 @@ local function addTextbox(page, label, placeholder, flag, cb)
     new("UIPadding", { PaddingLeft = UDim.new(0, 8) }, box)
     box.FocusLost:Connect(function()
         Flags[flag] = box.Text
-        if cb then task.spawn(cb, box.Text) end
+        if cb then task.spawn(runCb, label, cb, box.Text) end
     end)
     bind(flag, function(v)
         -- programmatic sets (config load, quest arming) have to move the flag
@@ -886,7 +927,7 @@ local function addTextbox(page, label, placeholder, flag, cb)
         v = (v == nil) and "" or tostring(v)
         box.Text = v
         Flags[flag] = v
-        if cb then task.spawn(cb, v) end
+        if cb then task.spawn(runCb, label, cb, v) end
     end)
     return box
 end
@@ -927,7 +968,7 @@ local function addKeybind(page, label, default, flag, cb)
             capturing = false
             btn.Text = input.KeyCode.Name
             Flags[flag] = input.KeyCode.Name
-            if cb then task.spawn(cb, input.KeyCode) end
+            if cb then task.spawn(runCb, label, cb, input.KeyCode) end
         end
     end))
 
@@ -935,7 +976,7 @@ local function addKeybind(page, label, default, flag, cb)
         btn.Text = tostring(v)
         Flags[flag] = v
         local key = Enum.KeyCode[v]
-        if key and cb then task.spawn(cb, key) end
+        if key and cb then task.spawn(runCb, label, cb, key) end
     end)
 
     return btn
@@ -1041,7 +1082,7 @@ local function addDropdown(page, label, optionsFn, default, flag, cb)
                 valueLbl.Text = tostring(opt) .. "  v"
                 Flags[flag] = opt
                 close()
-                if cb then task.spawn(cb, opt) end
+                if cb then task.spawn(runCb, label, cb, opt) end
             end)
         end
     end)
@@ -1050,7 +1091,7 @@ local function addDropdown(page, label, optionsFn, default, flag, cb)
         value = v
         valueLbl.Text = tostring(v) .. "  v"
         Flags[flag] = v
-        if cb then task.spawn(cb, v) end
+        if cb then task.spawn(runCb, label, cb, v) end
     end)
     Flags[flag] = value
     return valueLbl
@@ -1113,7 +1154,7 @@ local function addMultiSelect(page, label, options, default, flag, cb)
         end
         Flags[flag] = out
         summary()
-        if cb then task.spawn(cb, out) end
+        if cb then task.spawn(runCb, label, cb, out) end
     end
 
     summary()
@@ -1794,6 +1835,35 @@ local PSX = {
 
 local GUI_SCAN_CAP = 4000
 
+-- Games rarely put the words on the button itself. A shop row is an ImageButton
+-- with a TextLabel child, a pad is a Part with a SurfaceGui. Reading only
+-- `inst.Text` is why the engine used to match nothing at all: the switch lit up
+-- and no click ever fired. labelOf() walks the button's own children (bounded)
+-- so the words on the sticker are part of the haystack.
+local LABEL_DEPTH_CAP = 8
+
+local function labelOf(inst)
+    local parts = { string.lower(inst.Name) }
+    local ownText = inst:IsA("GuiObject") and inst.Text or nil
+    if ownText and ownText ~= "" then parts[#parts + 1] = string.lower(ownText) end
+
+    local walked = 0
+    for _, child in ipairs(inst:GetDescendants()) do
+        walked = walked + 1
+        if walked > LABEL_DEPTH_CAP then break end
+        if child:IsA("GuiObject") then
+            local okT, t = pcall(function() return child.Text end)
+            if okT and type(t) == "string" and t ~= "" then
+                parts[#parts + 1] = string.lower(t)
+            end
+            if child.Name and child.Name ~= "" then
+                parts[#parts + 1] = string.lower(child.Name)
+            end
+        end
+    end
+    return table.concat(parts, " ")
+end
+
 -- The hub's own window sits in PlayerGui as well. Walking it burns the scan
 -- budget and can push the game's real buttons past the cap, so every scan
 -- starts from PlayerGui children and skips our ScreenGui.
@@ -1818,16 +1888,103 @@ local function isShown(inst)
     while node and node ~= PG do
         if node == gui then return false end
         if node:IsA("GuiObject") and node.Visible == false then return false end
+        -- a disabled ScreenGui still reports Visible = true on its children
+        if node:IsA("LayerCollector") and node.Enabled == false then return false end
         node = node.Parent
     end
     return true
+end
+
+-- ============================================================
+-- SELF TEST  (the report killywilly sends back when a switch does nothing)
+-- ============================================================
+-- Everything here is read-only: no remote is fired, no part is moved. It
+-- answers the four questions that decide whether the hub can work at all -
+-- does the executor expose a click API, is the character loaded, can we see
+-- the game's GUI, and does a word match actually land on a button.
+local function selfTestReport()
+    local L = {}
+    local function add(s) L[#L + 1] = s end
+
+    add("Tupachup " .. VERSION)
+    add("game: " .. tostring(game.Name) .. "  (" .. tostring(game.PlaceId) .. ")")
+    add("detected: " .. tostring(DETECTED_NAME))
+
+    local exec = "unknown"
+    if type(identifyexecutor) == "function" then
+        local ok, a, b = pcall(identifyexecutor)
+        if ok then exec = tostring(b or a) end
+    elseif type(getexecutorname) == "function" then
+        local ok, a = pcall(getexecutorname)
+        if ok then exec = tostring(a) end
+    end
+    add("executor: " .. exec)
+
+    local keys = {}
+    for name, present in pairs(CAP) do
+        if present then keys[#keys + 1] = name end
+    end
+    table.sort(keys)
+    add("apis: " .. (#keys > 0 and table.concat(keys, ",") or "none"))
+
+    local c, hum = char()
+    local hrp = root()
+    add("character: " .. (c and tostring(c.Name) or "nil")
+        .. "  humanoid: " .. (hum and "yes" or "no")
+        .. "  root: " .. (hrp and "yes" or "no"))
+    if hum then
+        add("walkspeed: " .. tostring(hum.WalkSpeed) .. "  health: " .. tostring(hum.Health))
+    end
+
+    add("ui parent: " .. (gui.Parent and gui.Parent:GetFullName() or "nil")
+        .. "  visible: " .. tostring(gui.Enabled))
+    add("playerGui children: " .. tostring(#PG:GetChildren()))
+
+    -- what the engine can actually see in the game
+    local buttons, labels = 0, {}
+    eachGameGui(function(inst)
+        if inst:IsA("GuiButton") and isShown(inst) then
+            buttons = buttons + 1
+            if #labels < 10 then
+                local hay = labelOf(inst)
+                if #hay > 0 then labels[#labels + 1] = hay:sub(1, 24) end
+            end
+        end
+    end)
+    add("game buttons visible: " .. tostring(buttons))
+    if #labels > 0 then add("sample: " .. table.concat(labels, " | ")) end
+
+    -- does a word match actually land on a button right now (same haystack the
+    -- auto engine uses, inlined so this file's locals stay in declaration order)
+    local PROBE_WORDS = { "claim", "collect", "gift", "reward", "tap", "egg" }
+    local probe
+    eachGameGui(function(inst)
+        if inst:IsA("GuiButton") and isShown(inst) then
+            local hay = labelOf(inst)
+            for _, w in ipairs(PROBE_WORDS) do
+                if string.find(hay, w, 1, true) then
+                    probe = inst
+                    return false
+                end
+            end
+        end
+        return nil
+    end)
+    add("claim probe: " .. (probe and ("HIT " .. tostring(probe.Name)) or "no match"))
+
+    local ws = 0
+    local okW, parts = pcall(function() return #workspace:GetDescendants() end)
+    if okW then ws = parts or 0 end
+    add("workspace instances: " .. tostring(ws))
+
+    return table.concat(L, "\n")
 end
 
 function PSX.findButton(words)
     local hit
     eachGameGui(function(inst)
         if inst:IsA("GuiButton") and isShown(inst) then
-            local hay = string.lower(inst.Name) .. " " .. string.lower(inst.Text or "")
+            local hay = labelOf(inst)
             for _, w in ipairs(words) do
                 if string.find(hay, w, 1, true) then
                     hit = inst
@@ -1840,18 +1997,43 @@ function PSX.findButton(words)
     return hit
 end
 
+-- Three roads to a click, cheapest first. Some executors ship firesignal,
+-- some only ship fireclickdetector, some ship neither — the virtual-mouse
+-- fallback is the one that works on a barebones level-3 executor.
 function PSX.click(btn)
     if not btn then return false end
     -- a TextLabel has no MouseButton1Click; indexing one throws before pcall
     -- even runs, which is how a label used to kill the whole quest cycle
     if not btn:IsA("GuiButton") then return false end
-    if not CAP.firesignal then
-        notify("firesignal is missing on this executor - cannot click UI", "error")
-        return false
+
+    if CAP.firesignal then
+        local ok = pcall(function() firesignal(btn.MouseButton1Click) end)
+        if not ok then pcall(function() firesignal(btn.Activated) end) end
+        return true
     end
-    local ok = pcall(function() firesignal(btn.MouseButton1Click) end)
-    if not ok then pcall(function() firesignal(btn.Activated) end) end
-    return true
+
+    if CAP.clickDet then
+        local cd = btn:FindFirstChildWhichIsA("ClickDetector", true)
+        if cd then
+            local ok = pcall(fireclickdetector, cd)
+            if ok then return true end
+        end
+    end
+
+    if CAP.mouse then
+        local ap, as = btn.AbsolutePosition, btn.AbsoluteSize
+        local cx = ap.X + as.X * 0.5
+        local cy = ap.Y + as.Y * 0.5
+        local ok = pcall(function()
+            VirtualUser:Button1Down(Vector2.new(cx, cy))
+            task.wait(0.03)
+            VirtualUser:Button1Up(Vector2.new(cx, cy))
+        end)
+        if ok then return true end
+    end
+
+    notify("No click API on this executor (firesignal / fireclickdetector / mouse1click)", "error")
+    return false
 end
 
 function PSX.join()
@@ -2657,30 +2839,42 @@ local function autoFind(words, avoid, context)
         if #w > longest then longest = #w end
     end
 
+    local function scoreOf(hay)
+        local score = 0
+        for _, w in ipairs(words) do
+            if #w > score and string.find(hay, w, 1, true) then score = #w end
+        end
+        return score
+    end
+
+    local function blockedBy(hay)
+        for _, w in ipairs(avoid or {}) do
+            if string.find(hay, w, 1, true) then return true end
+        end
+        if context and #context > 0 then
+            for _, w in ipairs(context) do
+                if string.find(hay, w, 1, true) then return false end
+            end
+            return true
+        end
+        return false
+    end
+
     eachGameGui(function(inst)
         if inst:IsA("GuiButton") and isShown(inst) then
+            -- cheap pass first: name and own text. Only a miss pays for the
+            -- descendant walk, which is what most real game buttons need.
             local hay = string.lower(inst.Name) .. " " .. string.lower(inst.Text or "")
-            local score = 0
-            for _, w in ipairs(words) do
-                if #w > score and string.find(hay, w, 1, true) then score = #w end
+            local score = scoreOf(hay)
+            if score == 0 then
+                hay = labelOf(inst)
+                score = scoreOf(hay)
             end
-            if score > 0 then
-                local blocked = false
-                for _, w in ipairs(avoid or {}) do
-                    if string.find(hay, w, 1, true) then blocked = true break end
+            if score > 0 and not blockedBy(hay) then
+                if score > bestScore then
+                    best, bestScore = inst, score
                 end
-                if not blocked and context and #context > 0 then
-                    blocked = true
-                    for _, w in ipairs(context) do
-                        if string.find(hay, w, 1, true) then blocked = false break end
-                    end
-                end
-                if not blocked then
-                    if score > bestScore then
-                        best, bestScore = inst, score
-                    end
-                    if bestScore >= longest then return false end
-                end
+                if bestScore >= longest then return false end
             end
         end
         return nil
@@ -2688,10 +2882,25 @@ local function autoFind(words, avoid, context)
     return best
 end
 
+-- A switch that lights up and finds nothing is indistinguishable from a broken
+-- hub. After three empty sweeps the engine says so once per key: the words are
+-- printed, so it is obvious which panel has to be open first.
+Auto.missWarned = Auto.missWarned or {}
+Auto.missCount = Auto.missCount or {}
+
 function Auto.use(words, key, seconds, avoid, context)
     if not autoThrottle(key, seconds) then return false end
     local btn = autoFind(words, avoid, context)
-    if not btn then return false end
+    if not btn then
+        local n = (Auto.missCount[key] or 0) + 1
+        Auto.missCount[key] = n
+        if n == 3 and not Auto.missWarned[key] then
+            Auto.missWarned[key] = true
+            notify("No button for \"" .. tostring(words[1]) .. "\" on screen - open that panel in game", "warn", "Auto " .. tostring(key))
+        end
+        return false
+    end
+    Auto.missCount[key] = 0
     return PSX.click(btn)
 end
 
@@ -2701,6 +2910,11 @@ function Auto.options(words, fallback, cap)
     eachGameGui(function(inst)
         if inst:IsA("GuiButton") and isShown(inst) then
             local text = cleanText(inst.Text or "")
+            if text == "" then
+                -- the label usually lives one level down on an ImageButton
+                local lbl = inst:FindFirstChildWhichIsA("TextLabel", true)
+                if lbl then text = cleanText(lbl.Text or "") end
+            end
             local low = string.lower(text)
             if #text >= 3 and #text <= 28 and not seen[low] then
                 for _, w in ipairs(words) do
@@ -4111,6 +4325,56 @@ do
     end
 end
 
+-- One button that answers "nothing happens". It writes the report into a
+-- scrolling box on the page and into the clipboard, so the text can be pasted
+-- straight back. The box reserves its height at build time, so the Config
+-- section below still lands where it should.
+local selfBox = new("ScrollingFrame", {
+    Size = UDim2.new(0, set.w, 0, 168),
+    Position = UDim2.fromOffset(set.x, set.y),
+    BackgroundColor3 = THEME.Panel,
+    BorderSizePixel = 0,
+    CanvasSize = UDim2.new(0, 0, 0, 0),
+    ScrollBarThickness = 3,
+    ScrollBarImageColor3 = THEME.Stroke,
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, set.frame)
+new("UICorner", { CornerRadius = UDim.new(0, 6) }, selfBox)
+set.y = set.y + 174
+
+local selfNote = new("TextLabel", {
+    Size = UDim2.new(1, -12, 0, 24),
+    Position = UDim2.fromOffset(8, 6),
+    BackgroundTransparency = 1,
+    Text = "Run Self Test, then paste the report here.",
+    TextWrapped = true,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextYAlignment = Enum.TextYAlignment.Top,
+    Font = Enum.Font.Code,
+    TextSize = 10,
+    TextColor3 = THEME.Sub,
+}, selfBox)
+
+addButton(set, "Run Self Test", THEME.Accent, function()
+    local ok, report = pcall(selfTestReport)
+    if not ok then
+        selfNote.Text = "Self test failed: " .. tostring(report)
+        selfNote.TextColor3 = THEME.Red
+        notify(tostring(report), "error", "Self test")
+        return
+    end
+    selfNote.Text = report
+    selfNote.TextColor3 = THEME.Text
+    selfNote.Size = UDim2.new(1, -12, 0, 0)
+    selfNote.AutomaticSize = Enum.AutomaticSize.Y
+    if copy(report) then
+        notify("Self test copied - paste it in the chat", "success")
+    else
+        notify("Self test written above", "info")
+    end
+    warn("[Tupachup self test]\n" .. report)
+end)
+
 addSection(set, "Config")
 local cfgName = addTextbox(set, "Config Name", "default", "configName")
 addButton(set, "Save Config", THEME.Text, function() Features.saveConfig(cfgName.Text) end)
@@ -4372,6 +4636,8 @@ getgenv().Tupachup = {
     Toolkit = Toolkit,
     Quest = Quest,
     Auto = Auto,
+    SelfTest = selfTestReport,
+    PSX = PSX,
     CallSetter = callSetter,
     Pages = pages,
     Setters = Setters,
