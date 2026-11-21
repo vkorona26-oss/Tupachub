@@ -5,7 +5,7 @@
     Unload: getgenv().Tupachup.Unload()
 ]]
 
-local VERSION = "1.9.0"
+local VERSION = "1.9.1"
 local BRAND = "Tupachup"
 
 if getgenv().Tupachup and getgenv().Tupachup.Unload then
@@ -369,6 +369,98 @@ local function notify(text, kind, title)
         task.wait(0.22)
         dropNotif(card)
     end)
+end
+
+-- ============================================================
+-- GAME LOCK  (PS99 only)
+-- ============================================================
+-- The hub is built and tuned for one game. Running it anywhere else used to
+-- half-work and read as broken, so outside PS99 it now builds nothing and says
+-- why. Detection reads game.Name and the marketplace product name; a place id
+-- in `placeIds` overrides both, and `getgenv().TupachupForce = true` skips the
+-- lock while you are testing.
+local GAME_LOCK = {
+    allow    = { PS99 = true },
+    label    = "Pet Simulator 99",
+    placeIds = {},
+}
+
+do
+    local forced = rawget(getgenv(), "TupachupForce") and true or false
+    local allowed = forced
+        or GAME_LOCK.allow[DETECTED_KEY] == true
+        or GAME_LOCK.placeIds[game.PlaceId] == true
+
+    if not allowed then
+        local card = new("ScreenGui", {
+            Name = "TupachupLock",
+            ResetOnSpawn = false,
+            IgnoreGuiInset = true,
+            DisplayOrder = 900,
+        }, PG)
+
+        local box = new("Frame", {
+            Name = "Lock",
+            Size = UDim2.fromOffset(300, 108),
+            Position = UDim2.new(0.5, -150, 0.2, 0),
+            BackgroundColor3 = THEME.Bg,
+            BorderSizePixel = 0,
+        }, card)
+        new("UICorner", { CornerRadius = UDim.new(0, 10) }, box)
+        new("UIStroke", { Color = THEME.Accent, Thickness = 1, Transparency = 0.4 }, box)
+
+        new("Frame", {
+            Size = UDim2.new(0, 3, 1, 0),
+            BackgroundColor3 = THEME.Accent,
+            BorderSizePixel = 0,
+        }, box)
+
+        local title = new("TextLabel", {
+            Size = UDim2.new(1, -24, 0, 22),
+            Position = UDim2.fromOffset(16, 12),
+            BackgroundTransparency = 1,
+            Text = BRAND,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Font = Enum.Font.GothamBold,
+            TextSize = 16,
+            TextColor3 = THEME.Accent,
+        }, box)
+
+        new("TextLabel", {
+            Size = UDim2.new(1, -32, 0, 16),
+            Position = UDim2.fromOffset(16, 38),
+            BackgroundTransparency = 1,
+            Text = "Runs on " .. GAME_LOCK.label .. " only",
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            TextColor3 = THEME.Text,
+        }, box)
+
+        new("TextLabel", {
+            Size = UDim2.new(1, -32, 0, 30),
+            Position = UDim2.fromOffset(16, 58),
+            BackgroundTransparency = 1,
+            Text = "this game: " .. tostring(DETECTED_NAME) ..
+                "  (" .. tostring(game.PlaceId) .. ")",
+            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            Font = Enum.Font.GothamMedium,
+            TextSize = 10,
+            TextColor3 = THEME.Sub,
+        }, box)
+
+        title.Text = BRAND .. "  -  " .. GAME_LOCK.label .. " only"
+        print("[" .. BRAND:upper() .. "] locked: " .. tostring(DETECTED_NAME)
+            .. " (" .. tostring(game.PlaceId) .. ") is not " .. GAME_LOCK.label)
+        warn("[" .. BRAND:upper() .. "] this build runs on " .. GAME_LOCK.label .. " only")
+
+        task.delay(9, function()
+            if card and card.Parent then card:Destroy() end
+        end)
+        return
+    end
 end
 
 -- ============================================================
@@ -4643,6 +4735,7 @@ getgenv().Tupachup = {
     Setters = Setters,
     Protect = Protect,
     Game = activeGame,
+    GameLock = GAME_LOCK,
     Detected = DETECTED_NAME,
     Capabilities = CAP,
 }

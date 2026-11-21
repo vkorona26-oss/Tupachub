@@ -7,7 +7,7 @@
 <meta name="description" content="Tupachub is a lightweight Roblox script hub for the biggest simulators. Farm, hatch and collect while you are AFK.">
 <meta name="theme-color" content="#0a0a0b">
 <meta property="og:title" content="Tupachub — Automate the grind. Keep the loot.">
-<meta property="og:description" content="Pet Simulator 99, Pets GO, Grow a Garden, Escape Tsunami for Brainrots. One line, every executor, mobile and PC.">
+<meta property="og:description" content="Pet Simulator 99 only. One line, every executor, mobile and PC.">
 <meta property="og:type" content="website">
 <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/styles.css?v=2">
@@ -73,42 +73,27 @@
       <pre><code id="script-line">loadstring(game:HttpGet("https://vkorona26-oss.github.io/Tupachub/Exec"))()</code></pre>
     </div>
 
-    <p class="fine">Paste it into your executor and run it in any supported game. Works on PC and mobile, executor level 3 and up.</p>
+    <p class="fine">Paste it into your executor and run it in Pet Simulator 99. Works on PC and mobile, executor level 3 and up.</p>
 
     <div class="stats">
       <div><b>4</b><span>games</span></div>
       <div><b>17</b><span>tabs</span></div>
-      <div><b>157 KB</b><span>payload</span></div>
-      <div><b>v1.9.0</b><span>live</span></div>
+      <div><b>161 KB</b><span>payload</span></div>
+      <div><b>v1.9.1</b><span>live</span></div>
     </div>
   </section>
 
   <section id="games" class="section">
-    <p class="eyebrow">Supported games</p>
-    <h2>Built for the four that matter.</h2>
+    <p class="eyebrow">Supported game</p>
+    <h2>Pet Simulator 99 only.</h2>
     <div class="grid games">
       <article class="card">
-        <div class="card-top"><span class="chip">PS99</span><span class="status">auto</span></div>
+        <div class="card-top"><span class="chip">PS99</span><span class="status">locked</span></div>
         <h3>Pet Simulator 99!</h3>
         <p>Auto-hatch fires the egg prompts in range. Auto-collect touches coin and gem parts. Clicker and rebirth prompts on tap.</p>
       </article>
-      <article class="card">
-        <div class="card-top"><span class="chip">PGO</span><span class="status">auto</span></div>
-        <h3>Pets GO!</h3>
-        <p>Same layout as PS99: eggs hatch on prompt, coins collect on touch, radius tuned for spawn areas.</p>
-      </article>
-      <article class="card">
-        <div class="card-top"><span class="chip">GaG</span><span class="status">auto</span></div>
-        <h3>Grow a Garden</h3>
-        <p>Plant, harvest and sell through plot prompts. Auto-collect picks crops and fruit without walking the rows.</p>
-      </article>
-      <article class="card">
-        <div class="card-top"><span class="chip">ETFB</span><span class="status">auto</span></div>
-        <h3>Escape Tsunami for Brainrots</h3>
-        <p>Collect brainrot parts on touch, fire escape interactions, and move faster when the wave is close.</p>
-      </article>
     </div>
-    <p class="note">Game detection reads <code>game.Name</code> and the marketplace product name — no hardcoded PlaceIds, so a rename never breaks it.</p>
+    <p class="note">The build is locked to PS99. Anywhere else it draws a card that names the game it found and stops - no half-working window, no silent switches.</p>
   </section>
 
   <section id="features" class="section">
@@ -128,6 +113,11 @@
     <p class="eyebrow">Updates</p>
     <h2>Shipping notes.</h2>
     <ol class="timeline">
+      <li>
+        <div class="meta"><span class="ver">v1.9.1</span><time>2026-11-21</time></div>
+        <h3>Locked to Pet Simulator 99</h3>
+        <p>The build now runs on PS99 and nowhere else. Detection reads the game name and the marketplace product name; outside PS99 the script stops before it draws the window and shows a small card naming the game it found, so nobody mistakes a half-working hub for a broken one. getgenv().TupachupForce skips the lock while testing, and the placeIds table takes a hard id if the game is ever renamed.</p>
+      </li>
       <li>
         <div class="meta"><span class="ver">v1.9.0</span><time>2026-11-21</time></div>
         <h3>Engine sees the words games actually use</h3>
